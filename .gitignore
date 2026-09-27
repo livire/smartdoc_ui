@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Configuration. No secrets in here today — VITE_ values are compiled into
+# the bundle and are public by the time anyone loads the page — but it is
+# still per-deployment, and the same rule as every other service in this
+# system: .env reaches the deployment from the host, never from the repo.
+.env
+.env.*
+!.env.example
