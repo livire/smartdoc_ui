@@ -1,6 +1,6 @@
 import { authService } from "./authService";
 import { customerService } from "./customerService";
-import { LOCK_WINDOW_MS, requireReauth } from "./sessionExpiry";
+import { isSessionLocked, LOCK_WINDOW_MS, requireReauth } from "./sessionExpiry";
 
 /**
  * Keeps the session alive rather than waiting for it to break.
@@ -66,10 +66,37 @@ const clear = () => {
 async function renewNow() {
   if (!authService.getStoredToken()) return;
 
-  // Nobody has touched anything for a while. Let the session lapse the way
-  // Keycloak intends; whoever comes back is asked for a password, with their
-  // screen still behind the prompt.
+  // Nobody has touched anything for as long as this customer allows: lock
+  // the screen now.
+  //
+  // This used to stop renewing and wait for Keycloak to end the session
+  // instead. It never did anything visible. Keycloak allows 30 minutes
+  // idle, and anybody back inside that — which is nearly everybody — had
+  // their token quietly refreshed on the first click and was never asked
+  // for anything. A customer setting 2 minutes saw no difference at all.
+  //
+  // Locking is the app's own rule and does not fight Keycloak: it can only
+  // end a session sooner than the realm would, never keep one alive longer.
+  // The screen stays behind the prompt, so nothing on it is lost.
   if (!stillHere()) {
+    if (!isSessionLocked()) {
+      const signedBackIn = await requireReauth();
+      if (!signedBackIn) {
+        stopSessionKeeper();
+        return;
+      }
+      // Signing back in is itself a sign of life; without this the next
+      // pass would find the old timestamp and lock again immediately.
+      lastActivity = Date.now();
+    }
+    schedule();
+    return;
+  }
+
+  // Awake because the idle deadline came round, not because the token needs
+  // anything. Somebody working steadily would otherwise refresh every couple
+  // of minutes — once per idle limit — for no reason.
+  if (authService.msUntilExpiry() > RENEW_BEFORE_MS) {
     schedule();
     return;
   }
@@ -101,10 +128,18 @@ function schedule() {
   clear();
   if (!running || !authService.getStoredToken()) return;
 
-  const delay = Math.max(MIN_DELAY_MS, authService.msUntilExpiry() - RENEW_BEFORE_MS);
-  // When idle this comes back around and finds nothing to do, which is what
-  // lets a person returning to the tab pick up again without a reload.
-  timer = window.setTimeout(renewNow, stillHere() ? delay : Math.min(delay, 60_000));
+  // Two things this has to wake up for, whichever comes first: renewing the
+  // token before it expires, and noticing that the customer's idle limit has
+  // passed.
+  //
+  // Waking only for the renewal was why a 2-minute limit locked at four or
+  // five: the token had minutes left, so nothing ran until then, and the
+  // idle check only happens when something runs.
+  const untilRenew = authService.msUntilExpiry() - RENEW_BEFORE_MS;
+  const untilIdle = lastActivity + idleLimitMs() - Date.now();
+
+  const delay = Math.max(MIN_DELAY_MS, Math.min(untilRenew, untilIdle));
+  timer = window.setTimeout(renewNow, delay);
 }
 
 export function startSessionKeeper() {
@@ -121,16 +156,19 @@ export function startSessionKeeper() {
     window.addEventListener(event, seen, { passive: true }),
   );
 
-  // A laptop that slept comes back with timers that never fired and a token
-  // that expired while it was closed. Check on the way back in.
-  // Coming back to the tab is itself a sign of life, and a laptop that slept
-  // returns with timers that never fired and a token that expired while it
-  // was closed.
+  // Coming back to the tab is NOT a sign of life — being away is exactly the
+  // idleness being measured. It used to count as one, which reset the clock
+  // every time somebody switched windows and came back, so a short idle
+  // limit could never be reached by anyone who uses more than one
+  // application.
+  //
+  // What this is for instead: a sleeping laptop comes back with timers that
+  // never fired and a token that expired while it was shut. So on the way
+  // back in, work out where things actually stand rather than waiting for a
+  // timer that is now hours late.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !running) return;
-    seen();
-    if (authService.msUntilExpiry() < RENEW_BEFORE_MS) renewNow();
-    else schedule();
+    renewNow();
   });
 }
 

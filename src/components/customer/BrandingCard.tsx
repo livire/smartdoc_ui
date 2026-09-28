@@ -156,6 +156,13 @@ export default function BrandingCard({
   // Kept as text while it is being typed, so a half-deleted number does not
   // become 0 for a keystroke — the same reason the size field is text.
   const [idleMinutes, setIdleMinutes] = useState("15");
+  // What a password must look like here. Customer level only — a password
+  // belongs to a person, and a person can be on several projects, so there
+  // is no project-level answer.
+  const [pwMinLength, setPwMinLength] = useState("8");
+  const [pwDigit, setPwDigit] = useState(false);
+  const [pwSymbol, setPwSymbol] = useState(false);
+  const [pwCapital, setPwCapital] = useState(false);
   // The models every project here uses unless it says otherwise. Chosen
   // from what SmartDoc offers; the keys are SmartDoc's and never seen.
   const [categoriseModelId, setCategoriseModelId] = useState("");
@@ -184,6 +191,10 @@ export default function BrandingCard({
         setLabel(settings?.customer_label ?? "");
         setMaxFileMb(String(settings?.max_file_mb ?? 10));
         setIdleMinutes(String(settings?.idle_timeout_minutes ?? 15));
+        setPwMinLength(String(settings?.password_min_length ?? 8));
+        setPwDigit(settings?.password_needs_digit === 1);
+        setPwSymbol(settings?.password_needs_symbol === 1);
+        setPwCapital(settings?.password_needs_capital === 1);
         setCategoriseModelId(
           settings?.categorise_model_id != null ? String(settings.categorise_model_id) : "",
         );
@@ -212,6 +223,10 @@ export default function BrandingCard({
           menu_logo: menuLogo ?? "",
           max_file_mb: Number(maxFileMb),
           idle_timeout_minutes: Number(idleMinutes),
+          password_min_length: Number(pwMinLength),
+          password_needs_digit: (pwDigit ? 1 : 0) as 0 | 1,
+          password_needs_symbol: (pwSymbol ? 1 : 0) as 0 | 1,
+          password_needs_capital: (pwCapital ? 1 : 0) as 0 | 1,
           categorise_model_id: categoriseModelId ? Number(categoriseModelId) : null,
           read_model_id: readModelId ? Number(readModelId) : null,
         },
@@ -296,6 +311,52 @@ export default function BrandingCard({
           </div>
           <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
             Between 2 and 30. A session also ends after 10 hours whatever this says.
+          </p>
+        </div>
+
+        {/* What a password must look like here. Checked by auth_api before
+            the password reaches Keycloak — Keycloak has one policy for
+            every customer, which is why these cannot live there. Keycloak's
+            own policy stays underneath as the floor. */}
+        <div>
+          <Label htmlFor="customer-pw-length">Passwords</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="customer-pw-length"
+              compact
+              type="number"
+              min="8"
+              max="64"
+              value={pwMinLength}
+              onChange={(e) => setPwMinLength(e.target.value)}
+              className="max-w-28"
+            />
+            <span className="text-sm text-gray-500 dark:text-gray-400">characters at least</span>
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+            {(
+              [
+                ["Must contain a number", pwDigit, setPwDigit],
+                ["Must contain a capital letter", pwCapital, setPwCapital],
+                ["Must contain a symbol", pwSymbol, setPwSymbol],
+              ] as const
+            ).map(([label, value, setValue]) => (
+              <label key={label} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={value}
+                  onChange={(e) => setValue(e.target.checked)}
+                  className="size-4"
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+
+          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+            Applies when anyone here sets or changes a password. Existing passwords are
+            not affected until they are changed.
           </p>
         </div>
 

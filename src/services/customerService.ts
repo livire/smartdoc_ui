@@ -207,6 +207,10 @@ export const customerService = {
     login_logo: string | null;
     menu_logo: string | null;
     idle_timeout_minutes?: number;
+    password_min_length?: number;
+    password_needs_digit?: 0 | 1;
+    password_needs_symbol?: 0 | 1;
+    password_needs_capital?: 0 | 1;
   } | null {
     try {
       const raw = localStorage.getItem(this.cacheKey(customerId));
@@ -234,6 +238,11 @@ export const customerService = {
     max_file_mb?: number;
     // Minutes without a key or a click before the session is left to lapse.
     idle_timeout_minutes?: number;
+    // What a password must look like for this customer's people.
+    password_min_length?: number;
+    password_needs_digit?: 0 | 1;
+    password_needs_symbol?: 0 | 1;
+    password_needs_capital?: 0 | 1;
     // The customer's default model per purpose, from the /sys catalogue.
     categorise_model_id?: number | null;
     read_model_id?: number | null;
@@ -264,6 +273,10 @@ export const customerService = {
       menu_logo?: string;
       max_file_mb?: number;
       idle_timeout_minutes?: number;
+      password_min_length?: number;
+      password_needs_digit?: 0 | 1;
+      password_needs_symbol?: 0 | 1;
+      password_needs_capital?: 0 | 1;
       categorise_model_id?: number | null;
       read_model_id?: number | null;
     },

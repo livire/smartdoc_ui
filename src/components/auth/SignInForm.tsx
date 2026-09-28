@@ -26,6 +26,27 @@ export default function SignInForm({
   const { customer: contextCustomer, setCustomer, getStoredCustomer } = useCustomer();
   const customer = forCustomer ?? contextCustomer;
 
+  // What this customer asks of a password, from the settings already
+  // fetched for the logo on this very page. Shown before anybody types:
+  // being refused after choosing twice is a poor way to learn the rules.
+  const passwordRules = (() => {
+    const settings = customer?.customer_id
+      ? customerService.readCachedSettings(Number(customer.customer_id))
+      : null;
+    const minLength = Number(settings?.password_min_length ?? 8);
+    const parts: string[] = [];
+    if (settings?.password_needs_digit === 1) parts.push("a number");
+    if (settings?.password_needs_capital === 1) parts.push("a capital letter");
+    if (settings?.password_needs_symbol === 1) parts.push("a symbol");
+    return {
+      minLength,
+      text:
+        parts.length === 0
+          ? `At least ${minLength} characters`
+          : `At least ${minLength} characters, including ${parts.join(", ")}`,
+    };
+  })();
+
   // Sign in as the form's customer. Returns normally on success; throws
   // on failure with the stored customer restored.
   const signIn = async (username: string, password: string) => {
@@ -153,10 +174,13 @@ export default function SignInForm({
                   </Label>
                   <Input
                     type="password"
-                    placeholder="At least 8 characters"
+                    placeholder={passwordRules.text}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                   />
+                  <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {passwordRules.text}.
+                  </p>
                 </div>
                 <div>
                   <Label>
@@ -177,7 +201,7 @@ export default function SignInForm({
                     disabled={
                       settingPassword ||
                       isLoading ||
-                      newPassword.length < 8 ||
+                      newPassword.length < passwordRules.minLength ||
                       newPassword !== newPasswordAgain
                     }
                     onClick={async () => {

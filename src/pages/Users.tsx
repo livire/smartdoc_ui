@@ -10,6 +10,7 @@ import Input from "../components/form/input/InputField";
 import Checkbox from "../components/form/input/Checkbox";
 import { PlusIcon, PencilIcon, TrashBinIcon, LockIcon } from "../icons";
 import { useCustomer } from "../context/CustomerContext";
+import { customerService } from "../services/customerService";
 import { Role } from "../context/MembershipContext";
 import { authService, UserProject } from "../services/authService";
 import {
@@ -28,6 +29,8 @@ import type { KeycloakUser } from "../services/userManagementService";
 // is satisfied without anybody having to know the policy.
 const PASSWORD_PARTS = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnopqrstuvwxyz", "23456789", "!@#$%&*?"];
 
+// 14 unless the customer asks for more. The parts below already cover a
+// capital, a digit and a symbol, so only the length can fall short.
 const generatePassword = (length = 14) => {
   const all = PASSWORD_PARTS.join("");
   const pick = (from: string, count: number) => {
@@ -74,6 +77,31 @@ export default function Users({
   // administrator is, from /sys — where there is no customer in context at
   // all, by design.
   const { customer: contextCustomer } = useCustomer();
+  // What this customer asks of a password. Read from the settings already
+  // cached for the sign-in page, so no request is needed to show the rules
+  // or to make a temporary password that meets them.
+  const passwordRules = useMemo(() => {
+    const id = customerId ?? contextCustomer?.customer_id;
+    const settings = id ? customerService.readCachedSettings(Number(id)) : null;
+    return {
+      minLength: Number(settings?.password_min_length ?? 8),
+      needsDigit: settings?.password_needs_digit === 1,
+      needsSymbol: settings?.password_needs_symbol === 1,
+      needsCapital: settings?.password_needs_capital === 1,
+    };
+  }, [customerId, contextCustomer?.customer_id]);
+
+  // One sentence, shown before anybody types — and before the generated one
+  // is handed over, so whoever reads it out knows what the person will have
+  // to keep to when they choose their own.
+  const passwordRulesText = useMemo(() => {
+    const parts: string[] = [];
+    if (passwordRules.needsDigit) parts.push("a number");
+    if (passwordRules.needsCapital) parts.push("a capital letter");
+    if (passwordRules.needsSymbol) parts.push("a symbol");
+    const head = `At least ${passwordRules.minLength} characters`;
+    return parts.length === 0 ? `${head}.` : `${head}, including ${parts.join(", ")}.`;
+  }, [passwordRules]);
   // Held steady: built fresh on every render it was a new object each time,
   // so every effect that depends on it ran again, which fetched, which
   // rendered — the screen flickered and the network tab filled up.
@@ -712,7 +740,7 @@ export default function Users({
                             onClick={(e) => {
                               e.stopPropagation();
                               setResetFor(u);
-                              setResetPassword(generatePassword());
+                              setResetPassword(generatePassword(Math.max(14, passwordRules.minLength)));
                               setResetCopied(false);
                             }}
                             className="p-1.5 rounded text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.05]"
@@ -1168,7 +1196,8 @@ export default function Users({
             User: {resetFor.username}
           </h3>
           <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-            Generate a one-time temporary password for {resetFor.username}.
+            Generate a one-time temporary password for {resetFor.username}. They choose
+            their own at the next sign-in — {passwordRulesText.toLowerCase()}
           </p>
 
           <Label htmlFor="reset-password">Temporary password</Label>
@@ -1195,7 +1224,7 @@ export default function Users({
           <button
             type="button"
             onClick={() => {
-              setResetPassword(generatePassword());
+              setResetPassword(generatePassword(Math.max(14, passwordRules.minLength)));
               setResetCopied(false);
             }}
             className="mt-2 text-sm text-brand-500 hover:text-brand-600"
