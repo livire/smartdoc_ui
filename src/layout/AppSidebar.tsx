@@ -25,7 +25,15 @@ type NavItem = {
   name: string;
   icon: React.ReactNode;
   path?: string;
-  subItems?: { name: string; path: string; pro?: boolean; new?: boolean; adminOnly?: boolean }[];
+  subItems?: {
+    name: string;
+    path: string;
+    pro?: boolean;
+    new?: boolean;
+    adminOnly?: boolean;
+    // Needs `can_capture` — the screens where the work is done.
+    workOnly?: boolean;
+  }[];
   // Only rendered for a project admin. Cosmetic — the API enforces the same
   // rule, so hiding these just avoids offering actions that would be refused.
   adminOnly?: boolean;
@@ -57,12 +65,17 @@ const navItems: NavItem[] = [
     // "Administration" beside "Workspace" read as somewhere else to go
     // rather than the same work seen from above.
     subItems: [
-      { name: "My Assignments", path: "/my-assignments", pro: false },
-      { name: "Digitize", path: "/digitize", pro: false },
-      { name: "Verify", path: "/verify", pro: false },
+      // Doing the work, so not for a viewer — who is a member of the
+      // project and may read its finished documents in the viewer app, but
+      // captures nothing and verifies nothing. Without workOnly a viewer
+      // signing in here would see Digitize, open it, and be refused by the
+      // API with nothing on screen explaining why.
+      { name: "My Assignments", path: "/my-assignments", pro: false, workOnly: true },
+      { name: "Digitize", path: "/digitize", pro: false, workOnly: true },
+      { name: "Verify", path: "/verify", pro: false, workOnly: true },
       // What was uploaded but never recorded; also announced on the
       // dashboard when there is anything in it.
-      { name: "Not Recorded", path: "/not-recorded", pro: false },
+      { name: "Not Recorded", path: "/not-recorded", pro: false, workOnly: true },
       { name: "Assignments", path: "/assignments", pro: false, adminOnly: true },
       // Putting a whole file in order crosses every batch ever captured
       // against a folio, so it is its own screen.
@@ -134,9 +147,19 @@ const AppSidebar: React.FC = () => {
     // doing the work with handing it out.
     .map((nav) =>
       nav.subItems
-        ? { ...nav, subItems: nav.subItems.filter((sub) => !sub.adminOnly || membership.can_setup) }
+        ? {
+            ...nav,
+            subItems: nav.subItems.filter(
+              (sub) =>
+                (!sub.adminOnly || membership.can_setup) &&
+                (!sub.workOnly || membership.can_capture),
+            ),
+          }
         : nav,
-    );
+    )
+    // A viewer has none of the Workspace entries, and a heading that opens
+    // onto nothing is worse than no heading.
+    .filter((nav) => !nav.subItems || nav.subItems.length > 0);
 
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const location = useLocation();

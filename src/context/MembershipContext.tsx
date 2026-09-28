@@ -11,6 +11,10 @@ const API_URL = import.meta.env.VITE_API_URL;
 export const Role = {
   ADMIN: 1,
   WORKER: 2,
+  // Reads finished documents in the viewer app. Captures nothing, verifies
+  // nothing, is never handed a batch. 3 is skipped: it is 'cadmin', which
+  // lives on user.role_id rather than user_project.role_id.
+  VIEWER: 4,
 } as const;
 
 // What somebody may do across the whole customer, which no project can

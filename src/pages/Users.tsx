@@ -251,7 +251,9 @@ export default function Users({
         )
       );
       setToast({
-        message: `Role changed to ${roleId === Role.ADMIN ? "Admin" : "Worker"}`,
+        message: `Role changed to ${
+          roleId === Role.ADMIN ? "Admin" : roleId === Role.VIEWER ? "Viewer" : "Worker"
+        }`,
         type: "success",
       });
     } catch (err) {
@@ -802,7 +804,11 @@ export default function Users({
                       {projectNameById.get(String(up.project_id)) || "Unknown project"}
                     </TableCell>
                     <TableCell className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300">
-                      {up.role_id === Role.ADMIN ? "Admin" : "Worker"}
+                      {up.role_id === Role.ADMIN
+                        ? "Admin"
+                        : up.role_id === Role.VIEWER
+                          ? "Viewer"
+                          : "Worker"}
                     </TableCell>
                     <TableCell className="px-4 py-4 text-sm">
                       <div className="flex items-center gap-1">
@@ -888,6 +894,22 @@ export default function Users({
               <span className="block text-sm text-gray-800 dark:text-white/90">Worker</span>
               <span className="block text-xs text-gray-500 dark:text-gray-400">
                 Captures and verifies documents. No access to project setup.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="radio"
+              name="role"
+              className="mt-1"
+              checked={editRoleId === Role.VIEWER}
+              onChange={() => setEditRoleId(Role.VIEWER)}
+            />
+            <span>
+              <span className="block text-sm text-gray-800 dark:text-white/90">Viewer</span>
+              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                Reads finished documents in the viewer app. Cannot capture or verify.
               </span>
             </span>
           </label>
@@ -1071,6 +1093,7 @@ export default function Users({
               options={[
                 { value: String(Role.WORKER), label: "Worker — capture and verify documents" },
                 { value: String(Role.ADMIN), label: "Admin — also configure the project" },
+                { value: String(Role.VIEWER), label: "Viewer — read finished documents only" },
               ]}
               defaultValue={String(assignRoleId)}
               onChange={(value) => setAssignRoleId(Number(value))}
