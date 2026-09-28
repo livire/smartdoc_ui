@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PageMeta from "../components/common/PageMeta";
 import Toast from "../components/common/Toast";
 import Button from "../components/ui/button/Button";
@@ -9,7 +9,10 @@ import { useMembership } from "../context/MembershipContext";
 import { userManagementService } from "../services/userManagementService";
 import { authService } from "../services/authService";
 import { customerService } from "../services/customerService";
-import BrandingCard from "../components/customer/BrandingCard";
+import BrandingCard, {
+  BrandingCardHandle,
+  BrandingCardStatus,
+} from "../components/customer/BrandingCard";
 
 /**
  * What this customer's SmartDoc is called and looks like: the sign-in
@@ -34,6 +37,18 @@ export default function CustomerSettings() {
   const canEditRow = account.is_sysadmin;
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  // The settings card below draws no Save of its own; this screen's one
+  // button reaches into it.
+  const settingsRef = useRef<BrandingCardHandle>(null);
+  const [settingsStatus, setSettingsStatus] = useState<BrandingCardStatus>({
+    saving: false,
+    loading: true,
+  });
+  // Stable, so the card's effect does not fire on every render of this page.
+  const onSettingsStatus = useCallback((status: BrandingCardStatus) => {
+    setSettingsStatus(status);
+  }, []);
 
   useEffect(() => {
     if (!customer?.customer_id) return;
@@ -110,12 +125,32 @@ export default function CustomerSettings() {
     <div className="flex flex-col flex-1 w-full bg-gray-50 dark:bg-gray-900 overflow-auto min-w-0 min-h-0">
       <PageMeta title="Customer Settings | SmartDoc" description="How this customer's SmartDoc looks" />
 
-      <div className="space-y-4 p-4">
+      <div className="space-y-3 p-3">
+        {/* One Save for the whole screen, above everything it saves. The
+            settings live in the card below, which draws no button of its
+            own — this reaches into it. */}
+        <div className="flex items-center justify-end">
+          <Button
+            size="xs"
+            onClick={() => settingsRef.current?.save()}
+            // Disabled while the settings are still being read, but it does
+            // not say "Saving..." for that — only for an actual save.
+            disabled={settingsStatus.saving || settingsStatus.loading || loading}
+            startIcon={
+              <svg viewBox="0 0 24 24" fill="currentColor" className="size-4">
+                <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10z" />
+              </svg>
+            }
+          >
+            {settingsStatus.saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+
         {/* The customer itself — what SmartDoc set up for them. Editable by
             a system administrator; read-only for the customer's own people,
             who cannot raise their own limit but should be able to see it. */}
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800 lg:p-6">
-          <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+          <div className="mb-2 flex items-center justify-between gap-3">
             <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">Customer</h3>
             {!canEditRow ? (
               <span className="text-xs text-gray-500 dark:text-gray-400">Set by SmartDoc</span>
@@ -216,9 +251,11 @@ export default function CustomerSettings() {
         {/* How it looks: the customer's own to decide. */}
         {customer?.customer_id && (
           <BrandingCard
+            ref={settingsRef}
             customerId={customer.customer_id}
             customerName={customer.customer_name}
             onToast={setToast}
+            onStatusChange={onSettingsStatus}
           />
         )}
       </div>

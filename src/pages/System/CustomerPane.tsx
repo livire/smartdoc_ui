@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Button from "../../components/ui/button/Button";
 import Label from "../../components/form/Label";
 import Input from "../../components/form/input/InputField";
@@ -7,7 +7,11 @@ import { customerService, CustomerSummary } from "../../services/customerService
 import Users from "../Users";
 import Storage from "../Storage";
 import Toast from "../../components/common/Toast";
-import BrandingCard from "../../components/customer/BrandingCard";
+import BrandingCard, {
+  BrandingCardHandle,
+  BrandingCardStatus,
+} from "../../components/customer/BrandingCard";
+import CollapsiblePanel from "../../components/common/Panel";
 
 /**
  * One customer, as the people who run SmartDoc see it: its own row, where
@@ -35,13 +39,24 @@ export default function CustomerPane({
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  // The settings card draws no Save; this pane puts one above it.
+  const settingsRef = useRef<BrandingCardHandle>(null);
+  const [settingsStatus, setSettingsStatus] = useState<BrandingCardStatus>({
+    saving: false,
+    loading: true,
+  });
+  // Stable, so the card's effect does not fire on every render of this pane.
+  const onSettingsStatus = useCallback((status: BrandingCardStatus) => {
+    setSettingsStatus(status);
+  }, []);
   // Bumped by the refresh button. It is the key of the tab's content, so
   // the cards inside — branding, storage, users — are mounted afresh and
   // fetch again, while the list, the title row and the tabs stay put.
   const [refreshKey, setRefreshKey] = useState(0);
   // Two tabs, because they answer different questions: what this customer
   // is, and who is in it. The second is a long list and deserves the height.
-  const [tab, setTab] = useState<"customer" | "users">("customer");
+  const [tab, setTab] = useState<"customer" | "storage" | "users">("customer");
 
   // Another customer picked in the list: the form follows, rather than
   // keeping the last one's half-typed name.
@@ -55,8 +70,23 @@ export default function CustomerPane({
     setTab("customer");
   }, [customer]);
 
+  /**
+   * Save the customer's own row.
+   *
+   * Called by the one Save at the top, which saves the settings panels
+   * too — they are two records, but one screen, and two buttons meant
+   * somebody could change both and save half.
+   */
+  const saveEverything = async () => {
+    // The row first: if it is refused — a name already taken, a project
+    // limit below what they have — nothing else should have been written
+    // either, and its message is the one worth reading.
+    const ok = await save();
+    if (ok) await settingsRef.current?.save();
+  };
+
   const save = async () => {
-    if (!name.trim() || !url.trim()) return;
+    if (!name.trim() || !url.trim()) return false;
     setSaving(true);
     setSaved(null);
     setError(null);
@@ -76,9 +106,11 @@ export default function CustomerPane({
       setUrl(cleanUrl);
       setSaved("Saved");
       onSaved();
+      return true;
     } catch (err) {
       // The server explains a refusal — "already has 4 projects" — as it is.
       setError(err instanceof Error ? err.message : "Failed to save");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -118,6 +150,7 @@ export default function CustomerPane({
       <div className="flex flex-shrink-0 gap-1 border-b border-gray-200 bg-white px-4 dark:border-gray-800 dark:bg-gray-800">
         {([
           ["customer", "Customer"],
+          ["storage", "Storage"],
           ["users", `Users${customer.users ? ` (${customer.users})` : ""}`],
         ] as const).map(([key, label]) => (
           <button
@@ -141,7 +174,9 @@ export default function CustomerPane({
       <div
         key={refreshKey}
         className={`min-h-0 flex-1 ${
-          tab === "users" ? "flex flex-col overflow-hidden" : "overflow-auto"
+          tab === "users" || tab === "storage"
+            ? "flex flex-col overflow-hidden"
+            : "overflow-auto"
         }`}
       >
         {tab === "users" ? (
@@ -149,26 +184,43 @@ export default function CustomerPane({
              is the customer administrator's decision, on their own
              screens. */
           <Users customerId={customer.customer_id} manageProjects={false} />
+        ) : tab === "storage" ? (
+          /* Where this customer's documents live. Its own tab rather than a
+             panel on the Customer tab: it has a list, a search and its own
+             Add button, and the one Save there saves none of it. */
+          <Storage customerId={customer.customer_id} />
         ) : (
           <div className="space-y-4 p-4 pb-10">
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
-                  Basic Information
-                </h3>
-                <span className="flex items-center gap-3">
-                  {saved && <Toast message={saved} type="success" onClose={() => setSaved(null)} />}
-                  {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
-                  <Button
-                    size="xs"
-                    onClick={save}
-                    disabled={saving || !name.trim() || !url.trim() || Number(allowed) < 1}
-                  >
-                    {saving ? "Saving..." : "Save customer"}
-                  </Button>
-                </span>
-              </div>
+            {/* One Save for the whole pane, above everything it saves.
+                The row and the settings are two records, but two buttons
+                meant somebody could change both and save half. */}
+            <div className="flex items-center justify-end gap-3">
+              {saved && <Toast message={saved} type="success" onClose={() => setSaved(null)} />}
+              {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
+              <Button
+                size="xs"
+                onClick={saveEverything}
+                // Disabled while the settings are still being read, but it
+                // does not say "Saving..." for that — only for a real save.
+                disabled={
+                  saving ||
+                  settingsStatus.saving ||
+                  settingsStatus.loading ||
+                  !name.trim() ||
+                  !url.trim() ||
+                  Number(allowed) < 1
+                }
+                startIcon={
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="size-4">
+                    <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10z" />
+                  </svg>
+                }
+              >
+                {saving || settingsStatus.saving ? "Saving..." : "Save"}
+              </Button>
+            </div>
 
+            <CollapsiblePanel title="Basic Information" storageKey="sys.customer.basic">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <Label htmlFor="sys-customer-name">Name</Label>
@@ -231,23 +283,20 @@ export default function CustomerPane({
                   </div>
                 </div>
               </div>
-            </div>
+            </CollapsiblePanel>
 
             {/* How it looks — the same card the customer's own settings
                 page shows, so what SmartDoc sets up for them is what they
-                then see. */}
+                then see. It draws no Save of its own; the one at the top
+                saves it along with the row above. */}
             <BrandingCard
+              ref={settingsRef}
               customerId={customer.customer_id}
               customerName={customer.customer_name}
               onToast={setToast}
+              onStatusChange={onSettingsStatus}
             />
 
-            {/* Where this customer's documents live. A project cannot be
-                created until there is one, so it comes before the people who
-                would create it. */}
-            <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-              <Storage customerId={customer.customer_id} title="Storage" />
-            </div>
           </div>
         )}
       </div>

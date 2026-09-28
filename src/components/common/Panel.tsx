@@ -54,7 +54,7 @@ export default function CollapsiblePanel({
       {/* The header is tinted, the body is not: a row of panels then reads
           as a row of headings with their contents under them, rather than
           as several identical white boxes. */}
-      <div className="flex items-center gap-3 bg-gray-50 px-4 py-2.5 dark:bg-white/[0.03]">
+      <div className="flex items-center gap-3 bg-gray-50 px-3 py-2 dark:bg-white/[0.03]">
         <button
           type="button"
           onClick={toggle}
@@ -82,7 +82,7 @@ export default function CollapsiblePanel({
         {right && <span className="flex flex-shrink-0 items-center gap-2">{right}</span>}
       </div>
 
-      {open && <div className="border-t border-gray-100 p-4 dark:border-gray-800">{children}</div>}
+      {open && <div className="border-t border-gray-100 p-3 dark:border-gray-800">{children}</div>}
     </div>
   );
 }

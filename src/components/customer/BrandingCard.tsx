@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import Button from "../ui/button/Button";
 import Label from "../form/Label";
 import Input from "../form/input/InputField";
 import LogoPlaceholder from "../common/LogoPlaceholder";
+import CollapsiblePanel from "../common/Panel";
 import { authService } from "../../services/authService";
 import { customerService } from "../../services/customerService";
 import { modelCatalogueService, CatalogueModel } from "../../services/modelCatalogueService";
@@ -137,17 +138,47 @@ function LogoField({
  * customer's settings page and on the system administrator's customer pane
  * alike — the same card, told which customer by prop.
  */
-export default function BrandingCard({
+/**
+ * What the page can ask this card to do.
+ *
+ * The Save button is drawn by the page, at the very top above the
+ * customer's own card — one Save for the screen rather than one floating
+ * between two sections. So the page needs to reach in and save.
+ */
+export interface BrandingCardHandle {
+  save: () => Promise<void>;
+  saving: boolean;
+}
+
+/**
+ * Why two flags and not one "busy".
+ *
+ * A single flag made the page's button read "Saving..." the moment the
+ * screen opened, because the settings were still being fetched. They are
+ * different states and the button needs both: disabled while either is
+ * true, but only *saying* "Saving..." when something is actually being
+ * saved.
+ */
+export interface BrandingCardStatus {
+  saving: boolean;
+  loading: boolean;
+}
+
+function BrandingCard({
   customerId,
   customerName,
   onToast,
+  // Told whenever saving or loading changes, so the page's button can
+  // refuse a press and say which of the two is happening.
+  onStatusChange,
 }: {
   customerId: number;
   // A hint for the placeholder only; the label itself is never pre-filled
   // from it (see below).
   customerName?: string | null;
   onToast: (toast: { message: string; type: "success" | "error" }) => void;
-}) {
+  onStatusChange?: (status: BrandingCardStatus) => void;
+}, ref: React.Ref<BrandingCardHandle>) {
   const [label, setLabel] = useState("");
   // The house limit for every project this customer has, unless a project
   // says otherwise. Kept as text while it is typed, so a half-deleted
@@ -232,7 +263,7 @@ export default function BrandingCard({
         },
         token,
       );
-      onToast({ message: "Branding saved", type: "success" });
+      onToast({ message: "Settings saved", type: "success" });
     } catch (err) {
       onToast({
         message: err instanceof Error ? err.message : "Failed to save",
@@ -243,15 +274,21 @@ export default function BrandingCard({
     }
   };
 
+  // Both reported, never merged: pressing Save before the settings arrive
+  // would store the empty values this card starts with, so the button must
+  // be disabled — but it must not claim to be saving while it waits.
+  useEffect(() => {
+    onStatusChange?.({ saving, loading });
+  }, [saving, loading, onStatusChange]);
+
+  // The page owns the Save button; this is how it reaches the save.
+  useImperativeHandle(ref, () => ({ save, saving }));
+
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800 lg:p-6">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">Branding</h3>
-        <Button size="xs" onClick={save} disabled={saving || loading}>
-          {saving ? "Saving..." : "Save branding"}
-        </Button>
-      </div>
-      <div className="grid gap-5 lg:grid-cols-2">
+    <div className="space-y-3">
+      {/* How it looks: the name on screen and the two logos. */}
+      <CollapsiblePanel title="Branding" storageKey="customer.branding">
+      <div className="grid gap-x-5 gap-y-4 lg:grid-cols-2">
         <div>
           <Label htmlFor="customer-label">Customer label</Label>
           <Input
@@ -267,113 +304,48 @@ export default function BrandingCard({
           </p>
         </div>
 
-        {/* Not branding, but it belongs to the customer rather than to any
-            one project, and this is the customer's own card. */}
-        <div>
-          <Label htmlFor="customer-max-file">Customer level max file size</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="customer-max-file"
-              compact
-              type="number"
-              min="1"
-              value={maxFileMb}
-              onChange={(e) => setMaxFileMb(e.target.value)}
-              className="max-w-28"
-            />
-            <span className="text-sm text-gray-500 dark:text-gray-400">MB</span>
-          </div>
-          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-            Applies to every project. A project may set its own instead.
-          </p>
+        <div className="lg:col-span-2 grid gap-4 lg:grid-cols-2">
+          <LogoField
+            title="Sign-in logo"
+            hint={`Shown on the sign-in page. At least ${LOGO_SIZES.login.min[0]}×${LOGO_SIZES.login.min[1]}, fitted inside ${LOGO_SIZES.login.max[0]}×${LOGO_SIZES.login.max[1]}. PNG keeps a transparent background.`}
+            box={LOGO_SIZES.login.max}
+            name={label || customerName}
+            value={loginLogo}
+            onChange={setLoginLogo}
+            onError={(message) => onToast({ message, type: "error" })}
+          />
+          <LogoField
+            title="Menu logo"
+            hint={`Shown above the menu. At least ${LOGO_SIZES.menu.min[0]}×${LOGO_SIZES.menu.min[1]}, fitted inside ${LOGO_SIZES.menu.max[0]}×${LOGO_SIZES.menu.max[1]}.`}
+            box={LOGO_SIZES.menu.max}
+            name={label || customerName}
+            value={menuLogo}
+            onChange={setMenuLogo}
+            onError={(message) => onToast({ message, type: "error" })}
+          />
         </div>
+      </div>
+      </CollapsiblePanel>
 
-        {/* How long a session may sit untouched. The app's own rule: it
-            stops renewing the token after this long, and Keycloak's idle
-            timeout then ends the session. Keycloak's ten-hour maximum is
-            set once for the whole realm and is not this — the line below
-            says so, rather than leaving somebody to think this number
-            decides everything. */}
-        <div>
-          <Label htmlFor="customer-idle">Sign out after inactivity</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="customer-idle"
-              compact
-              type="number"
-              min="2"
-              max="30"
-              value={idleMinutes}
-              onChange={(e) => setIdleMinutes(e.target.value)}
-              className="max-w-28"
-            />
-            <span className="text-sm text-gray-500 dark:text-gray-400">minutes</span>
-          </div>
-          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-            Between 2 and 30. A session also ends after 10 hours whatever this says.
-          </p>
-        </div>
-
-        {/* What a password must look like here. Checked by auth_api before
-            the password reaches Keycloak — Keycloak has one policy for
-            every customer, which is why these cannot live there. Keycloak's
-            own policy stays underneath as the floor. */}
-        <div>
-          <Label htmlFor="customer-pw-length">Passwords</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="customer-pw-length"
-              compact
-              type="number"
-              min="8"
-              max="64"
-              value={pwMinLength}
-              onChange={(e) => setPwMinLength(e.target.value)}
-              className="max-w-28"
-            />
-            <span className="text-sm text-gray-500 dark:text-gray-400">characters at least</span>
-          </div>
-
-          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
-            {(
-              [
-                ["Must contain a number", pwDigit, setPwDigit],
-                ["Must contain a capital letter", pwCapital, setPwCapital],
-                ["Must contain a symbol", pwSymbol, setPwSymbol],
-              ] as const
-            ).map(([label, value, setValue]) => (
-              <label key={label} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={value}
-                  onChange={(e) => setValue(e.target.checked)}
-                  className="size-4"
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-
-          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-            Applies when anyone here sets or changes a password. Existing passwords are
-            not affected until they are changed.
-          </p>
-        </div>
-
-        {/* The models, chosen from what SmartDoc offers. A project may
-            differ; a stage switched on with neither chosen is refused. */}
+      {/* Which model reads and which categorises, for every project here
+          unless a project chooses its own. */}
+      <CollapsiblePanel title="AI Models" storageKey="customer.models" defaultOpen={false}>
+      {/* Side by side at their own width, not one per half of the screen:
+          two short dropdowns spread across a wide column read as two
+          unrelated settings. */}
+      <div className="flex flex-wrap gap-5">
         {(
           [
             ["categorise", categoriseModelId, setCategoriseModelId, "Categorise"],
             ["read", readModelId, setReadModelId, "OCR"],
           ] as const
-        ).map(([purpose, value, setValue, label]) => {
+        ).map(([purpose, value, setValue, modelLabel]) => {
           // Every offered model, for both: what a model is for is this
           // choice, not a property of the model.
           const choices = offered;
           return (
-            <div key={purpose}>
-              <Label htmlFor={`model-${purpose}`}>{label}</Label>
+            <div key={purpose} className="w-56">
+              <Label htmlFor={`model-${purpose}`}>{modelLabel}</Label>
               <select
                 id={`model-${purpose}`}
                 value={value}
@@ -389,36 +361,118 @@ export default function BrandingCard({
                   </option>
                 ))}
               </select>
-              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {choices.length === 0
-                  ? "SmartDoc offers no models yet."
-                  : "Applies to every project unless the project chooses its own."}
-              </p>
+              {choices.length === 0 && (
+                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  SmartDoc offers no models yet.
+                </p>
+              )}
             </div>
           );
         })}
       </div>
+      </CollapsiblePanel>
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <LogoField
-          title="Sign-in logo"
-          hint={`Shown on the sign-in page. At least ${LOGO_SIZES.login.min[0]}×${LOGO_SIZES.login.min[1]}, fitted inside ${LOGO_SIZES.login.max[0]}×${LOGO_SIZES.login.max[1]}. PNG keeps a transparent background.`}
-          box={LOGO_SIZES.login.max}
-          name={label || customerName}
-          value={loginLogo}
-          onChange={setLoginLogo}
-          onError={(message) => onToast({ message, type: "error" })}
-        />
-        <LogoField
-          title="Menu logo"
-          hint={`Shown above the menu. At least ${LOGO_SIZES.menu.min[0]}×${LOGO_SIZES.menu.min[1]}, fitted inside ${LOGO_SIZES.menu.max[0]}×${LOGO_SIZES.menu.max[1]}.`}
-          box={LOGO_SIZES.menu.max}
-          name={label || customerName}
-          value={menuLogo}
-          onChange={setMenuLogo}
-          onError={(message) => onToast({ message, type: "error" })}
-        />
+      {/* What a password must look like here. Checked by auth_api before
+          the password reaches Keycloak — a Keycloak realm has one policy for
+          everybody in it, which is why these cannot live there. Keycloak's
+          own policy stays underneath as the floor. */}
+      <CollapsiblePanel title="Password" storageKey="customer.passwords" defaultOpen={false}>
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
+          <div>
+            <Label htmlFor="customer-pw-length">Min characters</Label>
+            <Input
+              id="customer-pw-length"
+              compact
+              type="number"
+              min="8"
+              max="64"
+              value={pwMinLength}
+              onChange={(e) => setPwMinLength(e.target.value)}
+              className="max-w-20 text-right"
+            />
+          </div>
+
+          <div>
+            <Label>Must contain</Label>
+            <div className="flex h-9 flex-wrap items-center gap-x-5 gap-y-2">
+              {(
+                [
+                  ["Number", pwDigit, setPwDigit],
+                  ["Capital letter", pwCapital, setPwCapital],
+                  ["Symbol", pwSymbol, setPwSymbol],
+                ] as const
+              ).map(([label, value, setValue]) => (
+                <label
+                  key={label}
+                  className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+                >
+                  <input
+                    type="checkbox"
+                    checked={value}
+                    onChange={(e) => setValue(e.target.checked)}
+                    className="size-4"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+      </CollapsiblePanel>
+
+      {/* What is left: the limits that belong to the customer rather than
+          to any one project. */}
+      <CollapsiblePanel
+        title="Miscellaneous"
+        storageKey="customer.misc"
+        defaultOpen={false}
+      >
+      {/* Side by side at their own width rather than one per half of the
+          panel: two short numbers spread across a wide row read as two
+          unrelated settings.
+
+          The idle timeout is the app's own rule — it stops renewing the
+          token after this long, and Keycloak's idle rule then ends the
+          session. Keycloak's ten-hour maximum is a different thing, set
+          once for the whole realm; the 2-to-30 limits here are on the
+          field, so a number outside them cannot be typed. */}
+      <div className="flex flex-wrap gap-x-8 gap-y-3">
+        <div>
+          <Label htmlFor="customer-max-file">Max file size</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="customer-max-file"
+              compact
+              type="number"
+              min="1"
+              value={maxFileMb}
+              onChange={(e) => setMaxFileMb(e.target.value)}
+              className="max-w-20 text-right"
+            />
+            <span className="text-sm text-gray-500 dark:text-gray-400">MB</span>
+          </div>
+        </div>
+
+        <div>
+          <Label htmlFor="customer-idle">Idle timeout</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="customer-idle"
+              compact
+              type="number"
+              min="2"
+              max="30"
+              value={idleMinutes}
+              onChange={(e) => setIdleMinutes(e.target.value)}
+              className="max-w-20 text-right"
+            />
+            <span className="text-sm text-gray-500 dark:text-gray-400">minutes</span>
+          </div>
+        </div>
       </div>
+      </CollapsiblePanel>
     </div>
   );
 }
+
+export default forwardRef(BrandingCard);
