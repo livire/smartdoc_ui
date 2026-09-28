@@ -206,6 +206,7 @@ export const customerService = {
     customer_label: string | null;
     login_logo: string | null;
     menu_logo: string | null;
+    idle_timeout_minutes?: number;
   } | null {
     try {
       const raw = localStorage.getItem(this.cacheKey(customerId));
@@ -231,6 +232,8 @@ export const customerService = {
     login_logo: string | null;
     menu_logo: string | null;
     max_file_mb?: number;
+    // Minutes without a key or a click before the session is left to lapse.
+    idle_timeout_minutes?: number;
     // The customer's default model per purpose, from the /sys catalogue.
     categorise_model_id?: number | null;
     read_model_id?: number | null;
@@ -260,6 +263,7 @@ export const customerService = {
       login_logo?: string;
       menu_logo?: string;
       max_file_mb?: number;
+      idle_timeout_minutes?: number;
       categorise_model_id?: number | null;
       read_model_id?: number | null;
     },

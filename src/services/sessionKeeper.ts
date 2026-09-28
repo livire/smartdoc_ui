@@ -1,4 +1,5 @@
 import { authService } from "./authService";
+import { customerService } from "./customerService";
 import { LOCK_WINDOW_MS, requireReauth } from "./sessionExpiry";
 
 /**
@@ -29,7 +30,25 @@ const RENEW_BEFORE_MS = 60_000;
 // Activity, not visibility: a tab can be the visible one while its owner
 // spends an hour in another application, and the browser still calls it
 // visible.
-const IDLE_LIMIT_MS = 15 * 60_000;
+// The customer's own number, from Customer Setup. 15 minutes is what every
+// customer had before the setting existed and is what a customer who has
+// never changed it still gets.
+//
+// Read from the cached settings rather than fetched: this runs on a timer,
+// and a request every time would be a request every minute for a number
+// that changes once a year. A customer who changes it sees the new value
+// after the next sign-in, which is soon enough for a timeout.
+const DEFAULT_IDLE_MINUTES = 15;
+
+const idleLimitMs = () => {
+  const settings = customerService.readCachedSettingsForStoredCustomer();
+  const minutes = Number(settings?.idle_timeout_minutes);
+  // Not `||`: a stored 0 would silently become 15. The API refuses anything
+  // outside 2 to 30, so an odd value here means the cache is from an older
+  // version, and the old default is the right answer for it.
+  const usable = Number.isInteger(minutes) && minutes >= 2 && minutes <= 30;
+  return (usable ? minutes : DEFAULT_IDLE_MINUTES) * 60_000;
+};
 // Never schedule tighter than this, in case the clock says something odd.
 const MIN_DELAY_MS = 5_000;
 
@@ -37,7 +56,7 @@ let timer: number | null = null;
 let running = false;
 let lastActivity = Date.now();
 
-const stillHere = () => Date.now() - lastActivity < IDLE_LIMIT_MS;
+const stillHere = () => Date.now() - lastActivity < idleLimitMs();
 
 const clear = () => {
   if (timer !== null) window.clearTimeout(timer);

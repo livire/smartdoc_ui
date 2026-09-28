@@ -153,6 +153,9 @@ export default function BrandingCard({
   // says otherwise. Kept as text while it is typed, so a half-deleted
   // number does not become 0 for a keystroke.
   const [maxFileMb, setMaxFileMb] = useState("10");
+  // Kept as text while it is being typed, so a half-deleted number does not
+  // become 0 for a keystroke — the same reason the size field is text.
+  const [idleMinutes, setIdleMinutes] = useState("15");
   // The models every project here uses unless it says otherwise. Chosen
   // from what SmartDoc offers; the keys are SmartDoc's and never seen.
   const [categoriseModelId, setCategoriseModelId] = useState("");
@@ -180,6 +183,7 @@ export default function BrandingCard({
         // customer were ever renamed.
         setLabel(settings?.customer_label ?? "");
         setMaxFileMb(String(settings?.max_file_mb ?? 10));
+        setIdleMinutes(String(settings?.idle_timeout_minutes ?? 15));
         setCategoriseModelId(
           settings?.categorise_model_id != null ? String(settings.categorise_model_id) : "",
         );
@@ -207,6 +211,7 @@ export default function BrandingCard({
           login_logo: loginLogo ?? "",
           menu_logo: menuLogo ?? "",
           max_file_mb: Number(maxFileMb),
+          idle_timeout_minutes: Number(idleMinutes),
           categorise_model_id: categoriseModelId ? Number(categoriseModelId) : null,
           read_model_id: readModelId ? Number(readModelId) : null,
         },
@@ -265,6 +270,32 @@ export default function BrandingCard({
           </div>
           <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
             Applies to every project. A project may set its own instead.
+          </p>
+        </div>
+
+        {/* How long a session may sit untouched. The app's own rule: it
+            stops renewing the token after this long, and Keycloak's idle
+            timeout then ends the session. Keycloak's ten-hour maximum is
+            set once for the whole realm and is not this — the line below
+            says so, rather than leaving somebody to think this number
+            decides everything. */}
+        <div>
+          <Label htmlFor="customer-idle">Sign out after inactivity</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="customer-idle"
+              compact
+              type="number"
+              min="2"
+              max="30"
+              value={idleMinutes}
+              onChange={(e) => setIdleMinutes(e.target.value)}
+              className="max-w-28"
+            />
+            <span className="text-sm text-gray-500 dark:text-gray-400">minutes</span>
+          </div>
+          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+            Between 2 and 30. A session also ends after 10 hours whatever this says.
           </p>
         </div>
 
