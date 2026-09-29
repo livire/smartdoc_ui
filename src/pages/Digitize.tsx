@@ -55,6 +55,27 @@ export interface UploadedImage {
 const MIN_FIELD_CHARS = 5;
 const MAX_FIELD_CHARS = 30;
 
+/**
+ * How many files go up at the same time.
+ *
+ * Four, and deliberately not a setting. It is not a decision anybody at a
+ * customer can make well — the right number depends on the connection, not
+ * on the customer — and a settings screen would invite somebody to set 20
+ * and make uploads slower.
+ *
+ * Why four helps at all: the bytes go straight from the browser to storage
+ * on a pre-signed link, and one stream rarely fills a connection on its own
+ * because it spends much of its time waiting for round trips. Past about
+ * four to six the line is full and more only adds requests that queue — and
+ * on a weak connection it makes things worse, because each stream gets a
+ * thinner slice.
+ *
+ * Memory is not the constraint: the File is handed to fetch and the browser
+ * streams it from disk, so this is four file handles, not four scans held
+ * in memory.
+ */
+const CONCURRENT_UPLOADS = 4;
+
 const attributeFieldWidth = (attr: Attribute) => {
   if ((attr.type !== "S" && attr.type !== "N") || !attr.length) return null;
   const chars = Math.min(Math.max(attr.length, MIN_FIELD_CHARS), MAX_FIELD_CHARS);
@@ -1130,22 +1151,24 @@ export default function Digitize() {
       // it. The order within this run is the order the files were picked.
       const firstSequence = batchPaths.size + 1;
 
-      // Upload each file to S3 and confirm
+      // Upload each file to S3 and confirm — several at a time.
+      //
+      // One at a time was four times slower on a batch of fifty scans, for
+      // no reason: each file waited for the last to finish, and the line is
+      // idle in between. Four in flight keeps a slow connection busy without
+      // asking a scanning station's laptop to hold fifty requests open.
+      //
+      // Order is not lost by doing this. A page's number comes from its own
+      // position in the list (firstSequence + i), not from the order the
+      // uploads happen to finish in.
       let uploaded = 0;
-      for (let i = 0; i < filesToUpload.length; i++) {
-        // Checked here, between files: the one already on its way finishes
-        // rather than leaving a half-written object in the bucket.
-        if (cancelUploadRef.current) {
-          setToast({
-            message: `Upload stopped — ${uploaded} of ${filesToUpload.length} uploaded. The rest are still here.`,
-            type: "error",
-          });
-          break;
-        }
+      let finished = 0;
+      let stoppedEarly = false;
+      let nextIndex = 0;
 
+      const uploadOne = async (i: number) => {
         const image = filesToUpload[i];
         const uploadUrl = urlsResponse.uploads[i];
-        console.log('Upload URL object:', uploadUrl);
 
         setSelectedImages((prev) =>
           prev.map((img) => (img.id === image.id ? { ...img, uploading: true } : img))
@@ -1200,7 +1223,36 @@ export default function Digitize() {
           );
         }
 
-        setUploadProgress({ done: i + 1, total: filesToUpload.length });
+        finished += 1;
+        setUploadProgress({ done: finished, total: filesToUpload.length });
+      };
+
+      // Each worker takes the next file that nobody has started. Cancel is
+      // checked before taking one, so the files already on their way finish
+      // rather than leaving half-written objects in the bucket — the same
+      // promise the one-at-a-time version made.
+      const worker = async () => {
+        for (;;) {
+          if (cancelUploadRef.current) {
+            stoppedEarly = true;
+            return;
+          }
+          const i = nextIndex;
+          nextIndex += 1;
+          if (i >= filesToUpload.length) return;
+          await uploadOne(i);
+        }
+      };
+
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENT_UPLOADS, filesToUpload.length) }, worker)
+      );
+
+      if (stoppedEarly) {
+        setToast({
+          message: `Upload stopped — ${uploaded} of ${filesToUpload.length} uploaded. The rest are still here.`,
+          type: "error",
+        });
       }
 
       // The batch just added rows against this identifier — re-read the total
