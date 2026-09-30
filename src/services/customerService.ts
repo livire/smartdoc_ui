@@ -235,6 +235,9 @@ export const customerService = {
     customer_label: string | null;
     login_logo: string | null;
     menu_logo: string | null;
+    // The same marks for a dark screen. Null falls back to the light ones.
+    login_logo_dark?: string | null;
+    menu_logo_dark?: string | null;
     max_file_mb?: number;
     // Minutes without a key or a click before the session is left to lapse.
     idle_timeout_minutes?: number;
@@ -271,6 +274,8 @@ export const customerService = {
       customer_label?: string;
       login_logo?: string;
       menu_logo?: string;
+      login_logo_dark?: string;
+      menu_logo_dark?: string;
       max_file_mb?: number;
       idle_timeout_minutes?: number;
       password_min_length?: number;
@@ -302,6 +307,8 @@ export const customerService = {
       customer_label: null,
       login_logo: null,
       menu_logo: null,
+      login_logo_dark: null,
+      menu_logo_dark: null,
     };
     this.writeCachedSettings(customerId, { ...current, ...input });
   },

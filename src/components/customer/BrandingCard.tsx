@@ -70,6 +70,7 @@ function LogoField({
   value,
   onChange,
   onError,
+  dark = false,
 }: {
   title: string;
   hint: string;
@@ -78,6 +79,9 @@ function LogoField({
   value: string | null;
   onChange: (dataUrl: string | null) => void;
   onError: (message: string) => void;
+  /** Preview it on a dark panel — a mark for dark screens shown on white
+   *  tells nobody whether it works. */
+  dark?: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -86,7 +90,11 @@ function LogoField({
       <p className="text-sm font-medium text-gray-800 dark:text-white/90">{title}</p>
       <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{hint}</p>
 
-      <div className="mt-3 flex h-24 items-center justify-center rounded-lg bg-gray-50 p-3 dark:bg-white/[0.03]">
+      <div
+        className={`mt-3 flex h-24 items-center justify-center rounded-lg p-3 ${
+          dark ? "bg-gray-900" : "bg-gray-50 dark:bg-white/[0.03]"
+        }`}
+      >
         {value ? (
           // h/w-full, not max-*: `max-` only ever shrinks, so a small logo sat
           // at its own size in the middle of the frame instead of filling it.
@@ -201,6 +209,9 @@ function BrandingCard({
   const [offered, setOffered] = useState<CatalogueModel[]>([]);
   const [loginLogo, setLoginLogo] = useState<string | null>(null);
   const [menuLogo, setMenuLogo] = useState<string | null>(null);
+  // The same two for a dark screen, both optional.
+  const [loginLogoDark, setLoginLogoDark] = useState<string | null>(null);
+  const [menuLogoDark, setMenuLogoDark] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -232,6 +243,8 @@ function BrandingCard({
         setReadModelId(settings?.read_model_id != null ? String(settings.read_model_id) : "");
         setLoginLogo(settings?.login_logo ?? null);
         setMenuLogo(settings?.menu_logo ?? null);
+        setLoginLogoDark(settings?.login_logo_dark ?? null);
+        setMenuLogoDark(settings?.menu_logo_dark ?? null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -252,6 +265,8 @@ function BrandingCard({
           // "" clears one; the API leaves out what it isn't sent.
           login_logo: loginLogo ?? "",
           menu_logo: menuLogo ?? "",
+          login_logo_dark: loginLogoDark ?? "",
+          menu_logo_dark: menuLogoDark ?? "",
           max_file_mb: Number(maxFileMb),
           idle_timeout_minutes: Number(idleMinutes),
           password_min_length: Number(pwMinLength),
@@ -322,6 +337,35 @@ function BrandingCard({
             value={menuLogo}
             onChange={setMenuLogo}
             onError={(message) => onToast({ message, type: "error" })}
+          />
+        </div>
+
+        {/* The same two marks for a dark screen. Both optional: a logo that
+            reads on either background needs only the one, and a dark screen
+            falls back to the light version rather than showing nothing.
+            SmartDoc cannot tell from the picture whether it will read on
+            black — dark text, a white knockout, a shadow that vanishes — so
+            the customer says. */}
+        <div className="lg:col-span-2 grid gap-4 lg:grid-cols-2">
+          <LogoField
+            title="Sign-in logo for dark screens"
+            hint="Optional. Used when somebody is reading in dark mode; without it the sign-in logo above is used."
+            box={LOGO_SIZES.login.max}
+            name={label || customerName}
+            value={loginLogoDark}
+            onChange={setLoginLogoDark}
+            onError={(message) => onToast({ message, type: "error" })}
+            dark
+          />
+          <LogoField
+            title="Menu logo for dark screens"
+            hint="Optional. Used when somebody is reading in dark mode; without it the menu logo above is used."
+            box={LOGO_SIZES.menu.max}
+            name={label || customerName}
+            value={menuLogoDark}
+            onChange={setMenuLogoDark}
+            onError={(message) => onToast({ message, type: "error" })}
+            dark
           />
         </div>
       </div>
