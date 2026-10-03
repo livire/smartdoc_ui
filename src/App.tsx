@@ -10,6 +10,7 @@ import SystemModels from "./pages/System/SystemModels";
 import SignUp from "./pages/AuthPages/SignUp";
 import Digitize from "./pages/Digitize";
 import Users from "./pages/Users";
+import UserAccess from "./pages/UserAccess";
 import Projects from "./pages/Projects";
 import Identifiers from "./pages/Identifiers";
 import Attributes from "./pages/Attributes";
@@ -109,6 +110,8 @@ export default function App() {
             <Route path="/:customerUrl/digitize" element={<Digitize />} />
 
             <Route path="/:customerUrl/users" element={<Users />} />
+            {/* One person's access to every project, on one screen. */}
+            <Route path="/:customerUrl/users/:userId/access" element={<UserAccess />} />
 
             <Route path="/:customerUrl/projects" element={<Projects />} />
 

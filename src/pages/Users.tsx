@@ -5,10 +5,8 @@ import { Modal } from "../components/ui/modal";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "../components/ui/table";
 import Button from "../components/ui/button/Button";
 import Label from "../components/form/Label";
-import Select from "../components/form/Select";
 import Input from "../components/form/input/InputField";
-import Checkbox from "../components/form/input/Checkbox";
-import { PlusIcon, PencilIcon, TrashBinIcon, LockIcon } from "../icons";
+import { PencilIcon, LockIcon } from "../icons";
 import { useCustomer } from "../context/CustomerContext";
 import { customerService } from "../services/customerService";
 import { Role } from "../context/MembershipContext";
@@ -20,6 +18,7 @@ import {
   Project,
 } from "../services/userManagementService";
 import type { KeycloakUser } from "../services/userManagementService";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 
 // A password to hand over once. Nobody has to invent one, and nobody
 // reaches for their usual one: it is replaced at the first sign-in anyway.
@@ -61,6 +60,19 @@ const emptyNewUser = {
   lastName: "",
   password: "",
 };
+
+/**
+ * The three a viewer may or may not have, as small marks.
+ *
+ * Drawn beside the word rather than in three more columns: this panel is
+ * 352px wide and the question is "can they, yes or no", which a tinted or
+ * faded icon answers at a glance.
+ */
+const PRIVILEGE_MARKS = [
+  { field: "can_comment", label: "Comment", path: "M20 12a7 7 0 0 1-7 7H8l-4 3v-4.5A7 7 0 0 1 11 5h2a7 7 0 0 1 7 7z" },
+  { field: "can_annotate", label: "Annotate", path: "M4 20h4l10-10-4-4L4 16zM14.5 5.5l4 4" },
+  { field: "can_forward", label: "Forward", path: "M4 12h12M12 6l6 6-6 6M20 5v14" },
+] as const;
 
 export default function Users({
   customerId,
@@ -119,11 +131,6 @@ export default function Users({
   // Email and real name come from Keycloak, not the app's own `user` table.
   const [keycloakUsers, setKeycloakUsers] = useState<KeycloakUser[]>([]);
   const [detailsUnavailable, setDetailsUnavailable] = useState<string | null>(null);
-  const [changingRoleId, setChangingRoleId] = useState<number | null>(null);
-  // Role changes go through a dialog: it's a permission change, worth one
-  // deliberate step rather than an accidental scroll over a dropdown.
-  const [editingRoleFor, setEditingRoleFor] = useState<UserProject | null>(null);
-  const [editRoleId, setEditRoleId] = useState<number>(Role.WORKER);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -131,6 +138,13 @@ export default function Users({
 
   const [togglingUserId, setTogglingUserId] = useState<number | null>(null);
 
+  const navigate = useNavigate();
+  const { customerUrl } = useParams<{ customerUrl: string }>();
+  // Who to show when the screen opens. Set by the access screen on its way
+  // back, so returning lands on the person just being looked at rather than
+  // on nobody.
+  const [params] = useSearchParams();
+  const wanted = params.get("user");
   const [selectedUser, setSelectedUser] = useState<AppUser | null>(null);
 
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
@@ -153,18 +167,15 @@ export default function Users({
   const [resetting, setResetting] = useState(false);
   const [resetCopied, setResetCopied] = useState(false);
 
-  const [isAssignOpen, setIsAssignOpen] = useState(false);
-  const [assignProjectIds, setAssignProjectIds] = useState<number[]>([]);
   // The capacity granted on the projects being assigned. One role per
   // membership, so this applies to every project ticked in this dialog —
   // assign again with a different role if someone needs to differ per project.
-  const [assignRoleId, setAssignRoleId] = useState<number>(Role.WORKER);
-  const [assigningProject, setAssigningProject] = useState(false);
+  // A role for each project ticked, keyed by project id. One role for all
+  // of them was wrong: somebody can run one project and only read in
+  // another, which is the whole reason the role lives on the membership.
 
   const [pendingToggle, setPendingToggle] = useState<{ user: AppUser; nextActive: 0 | 1 } | null>(null);
 
-  const [removingProjectId, setRemovingProjectId] = useState<number | null>(null);
-  const [pendingRemove, setPendingRemove] = useState<UserProject | null>(null);
 
   // Keyed by String(id) — users/projects and user_project rows come from
   // different endpoints, and MySQL BIGINT columns can serialize as strings
@@ -204,15 +215,8 @@ export default function Users({
     });
   }, [users, search, keycloakUsers]);
 
-  const availableProjects = useMemo(
-    () =>
-      projects.filter(
-        (p) => !selectedUserProjects.some((up) => String(up.project_id) === String(p.project_id))
-      ),
-    [projects, selectedUserProjects]
-  );
 
-  const loadAll = async () => {
+  const loadAll = async (selectUsername?: string) => {
     if (!customer) return;
     setLoadingUsers(true);
     setError(null);
@@ -226,6 +230,17 @@ export default function Users({
       setUsers(usersResult);
       setProjects(projectsResult);
       setAllUserProjects(userProjectsResult);
+
+      // Somebody just created is who the screen should be showing — they
+      // were made to be given projects, and that is the next thing anybody
+      // does. Matched on the username, which is what was just typed.
+      if (selectUsername) {
+        const made = usersResult.find((u) => u.username === selectUsername);
+        if (made) setSelectedUser(made);
+      } else if (wanted) {
+        const back = usersResult.find((u) => String(u.user_id) === wanted);
+        if (back) setSelectedUser(back);
+      }
 
       // Fetched separately and allowed to fail: it needs `view-users` in
       // Keycloak, which not every project admin has. Losing it costs the
@@ -261,38 +276,7 @@ export default function Users({
     return [d?.firstName, d?.lastName].filter(Boolean).join(" ");
   };
 
-  const changeRole = async (up: UserProject, roleId: number) => {
-    setEditingRoleFor(null);
-    setChangingRoleId(up.user_project_id);
-    try {
-      const token = await authService.ensureValidToken();
-      await userManagementService.updateProjectRole(
-        up.user_project_id,
-        up.user_id,
-        up.project_id,
-        roleId,
-        token
-      );
-      setAllUserProjects((prev) =>
-        prev.map((row) =>
-          row.user_project_id === up.user_project_id ? { ...row, role_id: roleId } : row
-        )
-      );
-      setToast({
-        message: `Role changed to ${
-          roleId === Role.ADMIN ? "Admin" : roleId === Role.VIEWER ? "Viewer" : "Worker"
-        }`,
-        type: "success",
-      });
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : "Failed to change role",
-        type: "error",
-      });
-    } finally {
-      setChangingRoleId(null);
-    }
-  };
+
 
   const toggleActive = (u: AppUser) => {
     const nextActive = u.is_active === 1 ? 0 : 1;
@@ -396,17 +380,7 @@ export default function Users({
     setIsEditOpen(true);
   };
 
-  const openAssign = (u: AppUser) => {
-    setSelectedUser(u);
-    setAssignProjectIds([]);
-    setIsAssignOpen(true);
-  };
 
-  const toggleAssignProjectId = (projectId: number) => {
-    setAssignProjectIds((prev) =>
-      prev.includes(projectId) ? prev.filter((id) => id !== projectId) : [...prev, projectId]
-    );
-  };
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -463,7 +437,7 @@ export default function Users({
     setIsAddUserOpen(false);
     setNewUser(emptyNewUser);
     setCreatingUser(false);
-    loadAll();
+    loadAll(keycloakUser.username);
   };
 
   const handleEditUser = async (e: React.FormEvent) => {
@@ -494,67 +468,15 @@ export default function Users({
     }
   };
 
-  const handleAssignProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedUser || assignProjectIds.length === 0) return;
 
-    setAssigningProject(true);
-    try {
-      const token = await authService.ensureValidToken();
-      await Promise.all(
-        assignProjectIds.map((projectId) =>
-          userManagementService.assignProject(selectedUser.user_id, projectId, token, assignRoleId)
-        )
-      );
-      const rows = await userManagementService.getAllUserProjects(token);
-      setAllUserProjects(rows);
-      setToast({
-        message: `${assignProjectIds.length} project${assignProjectIds.length > 1 ? "s" : ""} assigned successfully`,
-        type: "success",
-      });
-      setIsAssignOpen(false);
-      setAssignProjectIds([]);
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : "Failed to assign projects",
-        type: "error",
-      });
-    } finally {
-      setAssigningProject(false);
-    }
-  };
 
-  const handleRemoveProject = (up: UserProject) => {
-    setPendingRemove(up);
-  };
-
-  const confirmRemoveProject = async () => {
-    if (!pendingRemove) return;
-    const up = pendingRemove;
-    setPendingRemove(null);
-
-    setRemovingProjectId(up.user_project_id);
-    try {
-      const token = await authService.ensureValidToken();
-      await userManagementService.removeProjectAssignment(up.user_project_id, token);
-      setAllUserProjects((prev) => prev.filter((row) => row.user_project_id !== up.user_project_id));
-      setToast({ message: "Project removed successfully", type: "success" });
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : "Failed to remove project",
-        type: "error",
-      });
-    } finally {
-      setRemovingProjectId(null);
-    }
-  };
 
   return (
     <div className="flex flex-col flex-1 w-full bg-gray-50 dark:bg-gray-900 overflow-hidden min-w-0 min-h-0">
       <PageMeta title="Users | SmartDoc" description="Manage users for this project" />
 
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 min-w-0 flex-shrink-0 overflow-hidden w-full">
+      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-2.5 min-w-0 flex-shrink-0 overflow-hidden w-full">
         <div className="flex items-center justify-between gap-4 w-full">
           <div className="relative w-full max-w-xs">
             <span className="absolute -translate-y-1/2 pointer-events-none left-3 top-1/2">
@@ -582,8 +504,33 @@ export default function Users({
               className="h-9 w-full rounded-lg border border-gray-200 bg-transparent py-2 pl-9 pr-3 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800"
             />
           </div>
-          <Button size="xs" onClick={() => setIsAddUserOpen(true)}>
-            Add User
+          <Button
+            size="xs"
+            onClick={() => {
+              // Cleared on the way in, not on the way out: a failed attempt
+              // keeps what was typed so the username can be corrected, but
+              // opening the dialog again starts from nothing rather than
+              // showing somebody last week's half-filled form.
+              setNewUser(emptyNewUser);
+              setIsAddUserOpen(true);
+            }}
+            startIcon={
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-4"
+              >
+                <circle cx="10" cy="8.5" r="3.5" />
+                <path d="M3.5 19.5a6.5 6.5 0 0 1 11.2-4.5" />
+                <path d="M18 14v6M15 17h6" />
+              </svg>
+            }
+          >
+            Add New User
           </Button>
         </div>
         {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
@@ -598,7 +545,10 @@ export default function Users({
       {/* Body */}
       <div
         className={`grid flex-1 grid-cols-1 overflow-hidden min-w-0 min-h-0 ${
-          manageProjects ? "lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" : ""
+          // The projects list is two columns of short text; the users
+          // table is four and carries the actions. A quarter of the screen
+          // is enough for the one and leaves the other room to fit.
+          manageProjects ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""
         }`}
       >
         {/* Users */}
@@ -606,22 +556,16 @@ export default function Users({
           <Table>
             <TableHeader className="border-b border-gray-100 dark:border-gray-800">
               <TableRow>
-                <TableCell isHeader className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                  Username
+                <TableCell isHeader className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                  User
                 </TableCell>
-                <TableCell isHeader className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                  Name
-                </TableCell>
-                <TableCell isHeader className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                <TableCell isHeader className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   Email
                 </TableCell>
-                <TableCell isHeader className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                  Customer role
-                </TableCell>
-                <TableCell isHeader className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                <TableCell isHeader className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   Created
                 </TableCell>
-                <TableCell isHeader className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                <TableCell isHeader className="whitespace-nowrap px-3 py-2.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400">
                   Actions
                 </TableCell>
               </TableRow>
@@ -653,21 +597,36 @@ export default function Users({
                           : "hover:bg-gray-50 dark:hover:bg-white/[0.03]"
                       }`}
                     >
-                      <TableCell className="px-4 py-3 text-sm font-medium text-gray-800 dark:text-white/90">
-                        {u.username}
-                      </TableCell>
-                      {/* One line each: a name or an address that wraps
-                          makes every row a different height, and the
-                          table wider than the pane. Cut with a tooltip
-                          instead. */}
-                      <TableCell className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                        <span title={fullName(u)} className="block max-w-[12rem] truncate">
-                          {fullName(u) || "—"}
+                      {/* The username with the real name under it, and the
+                          cAdmin mark beside it. Four columns instead of
+                          six: the pane is two fifths of the screen, and six
+                          columns of nowrap text put a scrollbar under the
+                          whole table. */}
+                      <TableCell className="px-3 py-2 text-sm">
+                        <span className="flex items-center gap-2">
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium text-gray-800 dark:text-white/90">
+                              {u.username}
+                            </span>
+                            {fullName(u) && (
+                              <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                                {fullName(u)}
+                              </span>
+                            )}
+                          </span>
+                          {Number(u.role_id) === CUSTOMER_ADMIN_ROLE && (
+                            <span
+                              title="Runs this customer"
+                              className="flex-shrink-0 rounded-full border border-brand-500/40 bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-500"
+                            >
+                              cAdmin
+                            </span>
+                          )}
                         </span>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                      <TableCell className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
                         <span className="flex items-center gap-1.5">
-                          <span title={detailsFor(u)?.email} className="block max-w-[14rem] truncate">
+                          <span title={detailsFor(u)?.email} className="block max-w-[13rem] truncate">
                             {detailsFor(u)?.email || "—"}
                           </span>
                           {/* Keycloak's own flag. An address nobody has
@@ -684,29 +643,16 @@ export default function Users({
                           )}
                         </span>
                       </TableCell>
-                      {/* Whether this person runs the customer. Read here,
-                          changed in Edit — and on the system side, changed
-                          there too, since creating the first one is how a
-                          customer is handed over. */}
-                      <TableCell className="whitespace-nowrap px-4 py-3 text-sm">
-                        {Number(u.role_id) === CUSTOMER_ADMIN_ROLE ? (
-                          <span className="rounded-full border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 text-xs font-medium text-brand-500">
-                            cAdmin
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
-                      </TableCell>
                       {/* Keycloak's date: the account is made there, and the
                           app's own row records none. Blank when names and
                           emails are unavailable, for the same reason. */}
-                      <TableCell className="whitespace-nowrap px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                      <TableCell className="whitespace-nowrap px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
                         {detailsFor(u)?.createdTimestamp
                           ? new Date(detailsFor(u)!.createdTimestamp!).toLocaleDateString()
                           : "—"}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap px-4 py-3 text-sm">
-                        <div className="flex items-center gap-2">
+                      <TableCell className="whitespace-nowrap px-3 py-2 text-sm">
+                        <div className="flex items-center justify-end gap-1">
                           {/* A switch, not a tick: this is a setting with two
                               states, and the tick read as "verified" rather
                               than "can sign in". */}
@@ -760,6 +706,36 @@ export default function Users({
                           >
                             <PencilIcon className="size-4" />
                           </button>
+                          {manageProjects && (
+                            <button
+                              type="button"
+                              title="Projects and privileges"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/${customerUrl}/users/${u.user_id}/access`);
+                              }}
+                              className="p-1.5 rounded text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.05]"
+                            >
+                              {/* A key: this screen is about what they may
+                                  do, not about storing anything. A folder
+                                  read as "their documents", which is the
+                                  one thing it is not. */}
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="size-4"
+                              >
+                                <circle cx="8" cy="15" r="3.5" />
+                                <path d="m10.5 12.5 7.5-7.5" />
+                                <path d="m15.5 7.5 2 2" />
+                                <path d="m18 5 2 2" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -774,102 +750,82 @@ export default function Users({
             shown to whoever runs SmartDoc. */}
         {manageProjects && (
         <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 overflow-auto min-w-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
-            <h3 className="flex items-baseline gap-2 text-sm font-medium text-gray-800 dark:text-white/90">
-              Projects
-              <span className="text-gray-300 dark:text-gray-600">|</span>
-              <span>{selectedUser ? selectedUser.username : "No user selected"}</span>
-            </h3>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                title="Add project"
-                disabled={!selectedUser}
-                onClick={() => selectedUser && openAssign(selectedUser)}
-                className="flex size-7 items-center justify-center rounded-lg bg-brand-500 text-white shadow-theme-xs transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <PlusIcon className="size-4" />
-              </button>
-            </div>
-          </div>
           <Table>
             <TableHeader className="border-b border-gray-100 dark:border-gray-800">
               <TableRow>
-                <TableCell isHeader className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                  Project ID
-                </TableCell>
                 <TableCell isHeader className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   Project Name
                 </TableCell>
                 <TableCell isHeader className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
                   Role
                 </TableCell>
-                <TableCell isHeader className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                  Actions
-                </TableCell>
+
               </TableRow>
             </TableHeader>
             <TableBody className="divide-y divide-gray-100 dark:divide-gray-800">
               {!selectedUser ? (
                 <TableRow>
-                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={4}>
-                    Select a user to view their projects
+                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={2}>
+                    Select a user to see their projects
                   </TableCell>
                 </TableRow>
               ) : selectedUserProjects.length === 0 ? (
                 <TableRow>
-                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={4}>
+                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={2}>
                     No projects assigned
                   </TableCell>
                 </TableRow>
               ) : (
                 selectedUserProjects.map((up) => (
                   <TableRow key={up.user_project_id}>
-                    <TableCell className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300">
-                      {up.project_id}
-                    </TableCell>
                     <TableCell className="px-4 py-4 text-sm text-gray-800 dark:text-white/90">
                       {projectNameById.get(String(up.project_id)) || "Unknown project"}
                     </TableCell>
                     <TableCell className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300">
-                      {up.role_id === Role.ADMIN
-                        ? "Admin"
-                        : up.role_id === Role.VIEWER
-                          ? "Viewer"
-                          : "Worker"}
-                    </TableCell>
-                    <TableCell className="px-4 py-4 text-sm">
-                      <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        title="Change role"
-                        disabled={changingRoleId === up.user_project_id}
-                        onClick={() => {
-                          setEditingRoleFor(up);
-                          setEditRoleId(up.role_id ?? Role.WORKER);
-                        }}
-                        className="p-1.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/[0.05]"
-                      >
-                        {changingRoleId === up.user_project_id ? (
-                          <span className="block size-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
-                        ) : (
-                          <PencilIcon className="size-4" />
+                      <span className="flex items-center gap-2">
+                        {up.role_id === Role.ADMIN
+                          ? "Admin"
+                          : up.role_id === Role.VIEWER
+                            ? "Viewer"
+                            : "Worker"}
+
+                        {/* What a viewer may add, beside the word. "Viewer"
+                            alone says nothing about whether they can comment
+                            or send a page on, which is the thing somebody
+                            came to this panel to check. Only for a viewer:
+                            an admin has all three and a worker does not open
+                            the reading app. */}
+                        {up.role_id === Role.VIEWER && (
+                          <span className="flex items-center gap-0.5">
+                            {PRIVILEGE_MARKS.map(({ field, label, path }) => {
+                              const on = (up[field] ?? 1) === 1;
+                              return (
+                                <span
+                                  key={field}
+                                  title={`${label}: ${on ? "yes" : "no"}`}
+                                  className={
+                                    on
+                                      ? "text-brand-500"
+                                      : "text-gray-400 line-through decoration-gray-400 dark:text-gray-500"
+                                  }
+                                >
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.9"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    className="size-3.5"
+                                  >
+                                    <path d={path} />
+                                  </svg>
+                                </span>
+                              );
+                            })}
+                          </span>
                         )}
-                      </button>
-                      <button
-                        type="button"
-                        title="Remove project"
-                        disabled={removingProjectId === up.user_project_id}
-                        onClick={() => handleRemoveProject(up)}
-                        className="p-1.5 rounded text-gray-500 hover:bg-gray-100 hover:text-error-500 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/[0.05]"
-                      >
-                        {removingProjectId === up.user_project_id ? (
-                          <span className="block size-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
-                        ) : (
-                          <TrashBinIcon className="size-4" />
-                        )}
-                      </button>
-                      </div>
+                      </span>
                     </TableCell>
                   </TableRow>
                 ))
@@ -880,83 +836,7 @@ export default function Users({
         )}
       </div>
 
-      {/* Change role dialog */}
-      <Modal isOpen={!!editingRoleFor} onClose={() => setEditingRoleFor(null)} className="max-w-lg p-6">
-        <h3 className="mb-1 text-lg font-semibold text-gray-800 dark:text-white/90">Change role</h3>
-        <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-          {selectedUser?.username} on{" "}
-          <span className="font-medium text-gray-700 dark:text-gray-300">
-            {editingRoleFor
-              ? projectNameById.get(String(editingRoleFor.project_id)) || "Unknown project"
-              : ""}
-          </span>
-          . A role applies to this project only.
-        </p>
-
-        <div className="space-y-3">
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="radio"
-              name="role"
-              className="mt-1"
-              checked={editRoleId === Role.ADMIN}
-              onChange={() => setEditRoleId(Role.ADMIN)}
-            />
-            <span>
-              <span className="block text-sm text-gray-800 dark:text-white/90">Admin</span>
-              <span className="block text-xs text-gray-500 dark:text-gray-400">
-                Sets the project up — storage, categories, attributes, users — and can verify.
-              </span>
-            </span>
-          </label>
-
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="radio"
-              name="role"
-              className="mt-1"
-              checked={editRoleId === Role.WORKER}
-              onChange={() => setEditRoleId(Role.WORKER)}
-            />
-            <span>
-              <span className="block text-sm text-gray-800 dark:text-white/90">Worker</span>
-              <span className="block text-xs text-gray-500 dark:text-gray-400">
-                Captures and verifies documents. No access to project setup.
-              </span>
-            </span>
-          </label>
-
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="radio"
-              name="role"
-              className="mt-1"
-              checked={editRoleId === Role.VIEWER}
-              onChange={() => setEditRoleId(Role.VIEWER)}
-            />
-            <span>
-              <span className="block text-sm text-gray-800 dark:text-white/90">Viewer</span>
-              <span className="block text-xs text-gray-500 dark:text-gray-400">
-                Reads finished documents in the viewer app. Cannot capture or verify.
-              </span>
-            </span>
-          </label>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-3">
-          <Button size="xs" type="button" variant="outline" onClick={() => setEditingRoleFor(null)}>
-            Cancel
-          </Button>
-          <Button size="xs"
-            type="button"
-            disabled={!editingRoleFor || editRoleId === editingRoleFor.role_id}
-            onClick={() => editingRoleFor && changeRole(editingRoleFor, editRoleId)}
-          >
-            Save Role
-          </Button>
-        </div>
-      </Modal>
-
+      
       {/* Add New User modal */}
       <Modal isOpen={isAddUserOpen} onClose={() => setIsAddUserOpen(false)} className="max-w-md p-6">
         <h3 className="mb-5 text-lg font-semibold text-gray-800 dark:text-white/90">Add New User</h3>
@@ -1092,58 +972,7 @@ export default function Users({
         </form>
       </Modal>
 
-      {/* Add Projects modal */}
-      <Modal isOpen={isAssignOpen} onClose={() => setIsAssignOpen(false)} className="max-w-md p-6">
-        <h3 className="mb-5 text-lg font-semibold text-gray-800 dark:text-white/90">
-          Add Projects{selectedUser ? ` — ${selectedUser.username}` : ""}
-        </h3>
-        <form onSubmit={handleAssignProject} className="space-y-4">
-          {availableProjects.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              No unassigned projects available for this user.
-            </p>
-          ) : (
-            <div className="space-y-3 max-h-72 overflow-y-auto">
-              {availableProjects.map((p) => (
-                <Checkbox
-                  key={p.project_id}
-                  id={`assign-project-${p.project_id}`}
-                  label={p.project_name}
-                  checked={assignProjectIds.includes(p.project_id)}
-                  onChange={() => toggleAssignProjectId(p.project_id)}
-                />
-              ))}
-            </div>
-          )}
-          <div className="pt-1">
-            <Label htmlFor="assign-role">Role on {assignProjectIds.length > 1 ? "these projects" : "this project"}</Label>
-            <Select
-              options={[
-                { value: String(Role.WORKER), label: "Worker — capture and verify documents" },
-                { value: String(Role.ADMIN), label: "Admin — also configure the project" },
-                { value: String(Role.VIEWER), label: "Viewer — read finished documents only" },
-              ]}
-              defaultValue={String(assignRoleId)}
-              onChange={(value) => setAssignRoleId(Number(value))}
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <Button
-              size="xs"
-              type="button"
-              variant="outline"
-              onClick={() => setIsAssignOpen(false)}
-              disabled={assigningProject}
-            >
-              Cancel
-            </Button>
-            <Button size="xs" type="submit" disabled={assigningProject || assignProjectIds.length === 0}>
-              {assigningProject ? "Assigning..." : `Assign${assignProjectIds.length > 0 ? ` (${assignProjectIds.length})` : ""}`}
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
+      
       {/* Enable/disable confirmation dialog */}
       <Modal isOpen={!!pendingToggle} onClose={() => setPendingToggle(null)} className="max-w-sm p-6">
         <h3 className="mb-2 text-lg font-semibold text-gray-800 dark:text-white/90">
@@ -1164,27 +993,7 @@ export default function Users({
         </div>
       </Modal>
 
-      {/* Remove project confirmation dialog */}
-      <Modal isOpen={!!pendingRemove} onClose={() => setPendingRemove(null)} className="max-w-sm p-6">
-        <h3 className="mb-2 text-lg font-semibold text-gray-800 dark:text-white/90">
-          Remove project?
-        </h3>
-        <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-          {pendingRemove &&
-            `Remove "${
-              projectNameById.get(String(pendingRemove.project_id)) || `project ${pendingRemove.project_id}`
-            }" from this user?`}
-        </p>
-        <div className="flex justify-end gap-3">
-          <Button size="xs" type="button" variant="outline" onClick={() => setPendingRemove(null)}>
-            Cancel
-          </Button>
-          <Button size="xs" type="button" onClick={confirmRemoveProject}>
-            Remove
-          </Button>
-        </div>
-      </Modal>
-
+      
       {/* The password is made here rather than thought up: one less thing to
           decide, and it will not be somebody's usual password. It is
           temporary in Keycloak's sense — whoever receives it is asked to

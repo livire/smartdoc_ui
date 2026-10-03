@@ -133,9 +133,57 @@ them in. `AuthContext.login` lets that one error through without setting
 `error`, so the page does not go red for a password that was right.
 
 **Roles are per project, not per user** (`user_project.role_id`: 1 admin,
-2 worker), so they belong in the projects pane, not the user row. Changing one
-is a `PUT /user_project/`, which writes the whole row — `user_id` and
-`project_id` go with it or they get blanked.
+2 worker, 4 viewer), so they belong to the membership, not the user row.
+Changing one is a `PUT /user_project/`, which writes the whole row —
+`user_id` and `project_id` go with it or they get blanked.
+
+### Projects and privileges (rebuilt 2026-10-01)
+The projects pane on this screen is **read-only**: it says which projects
+the selected person is on and in what capacity, and for a viewer it shows
+three small marks for comment, annotate and forward — tinted when they have
+it, faint when they do not. "Viewer" alone says nothing about whether they
+can send a page on, which is what somebody came to check.
+
+Everything is changed on **its own screen**, `pages/UserAccess.tsx`, reached
+by the key beside each person (`/:customerUrl/users/:userId/access`). Every
+project the customer has is a row — the ones they are on and the ones they
+are not — so "what can this person see?" is read rather than assembled by
+clicking through projects one at a time, which was the old screen's real
+fault.
+
+Changes are held until Save, which counts them. A screen that writes on
+every click turns a moment's rethinking into four requests and a
+half-applied state. Leaving with something unsaved asks first.
+
+The three privileges are shown for every role and greyed except on viewer:
+an administrator has all three whatever is stored, a worker does not open
+the reading app at all. Shown rather than hidden, so the answer for every
+role is in one place.
+
+Unticking a project clears its row — a role and three privileges left under
+an unticked project read as settings that still apply, and they do not.
+
+## Two endpoints with caps, and why both broke
+`smartdoc_upload_api` refuses more than **100 files** to
+`/upload/request-urls` and more than **200 keys** to `/s3/download-urls`.
+Each answer is a signed link per item, and a few hundred at once is what the
+caps exist to prevent.
+
+Both front ends handed it a whole collection and showed the refusal to the
+person as though their documents were at fault — "Cannot request more than
+100 files at once" on a 120-page batch, "Too many keys: 354" on a long file.
+Both now ask in runs and join the answers, saying nothing: it is a limit of
+the call, not of the work.
+
+**This is the shape to watch for.** It works in testing and fails on real
+data, and it will not be the last capped endpoint.
+
+## Saving a batch of verification decisions
+`POST /verification/decide-many` — every verdict in one request. Sending
+them one at a time meant the server rebuilt the entire review per page: on a
+194-page batch, about eleven minutes. Notes typed on a page are still
+written one at a time, because each is its own row and there are rarely more
+than a handful.
 
 ## Before working on verification UI
 Verification is scoped to an **identifier** (a batch of images), not a

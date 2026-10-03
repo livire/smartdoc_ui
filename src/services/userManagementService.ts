@@ -189,12 +189,26 @@ export const userManagementService = {
   // a project is an update to that row rather than a separate grant.
   // PUT /user_project/ needs user_id and project_id as well — it writes the
   // whole row, so sending role_id alone would blank the other two.
+  /**
+   * The role on one project, and the three exceptions that go with it.
+   *
+   * Null on an exception means "use whatever the role gives"; only a
+   * viewer's are ever read, since an administrator has all three however
+   * these are set.
+   */
   async updateProjectRole(
     userProjectId: number,
     userId: number,
     projectId: number,
     roleId: number,
-    accessToken: string
+    accessToken: string,
+    // 1, 0 or null — null being "use whatever the role gives", the same
+    // three values the column holds.
+    allowed?: {
+      can_comment?: number | null;
+      can_annotate?: number | null;
+      can_forward?: number | null;
+    }
   ): Promise<UserProject> {
     const response = await fetch(`${API_URL}/user_project/`, {
       method: "PUT",
@@ -204,6 +218,7 @@ export const userManagementService = {
         user_id: userId,
         project_id: projectId,
         role_id: roleId,
+        ...(allowed ?? {}),
       }),
     });
 

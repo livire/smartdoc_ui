@@ -478,24 +478,36 @@ export default function VerifyBatch() {
       const token = await authService.ensureValidToken();
       let latest = review;
 
+      // Every verdict in one request. A staged change back to undecided is
+      // dropped rather than written, and a saved one cannot be cleared.
+      const verdicts = list
+        .filter((item) => {
+          const change = pending.get(item.image.image_id)!;
+          return change.decision !== null && change.decision !== item.decision;
+        })
+        .map((item) => {
+          const change = pending.get(item.image.image_id)!;
+          return {
+            image_id: item.image.image_id,
+            accept: change.decision === ImageDecision.VERIFIED,
+            comment: change.comment,
+          };
+        });
+
+      if (verdicts.length > 0) {
+        setSavingImageId(verdicts[0].image_id);
+        latest = await verificationService.decideImages(id, verdicts, token);
+        setSavingDecisions({ done: verdicts.length, total: list.length });
+      }
+
+      // Then the notes typed on each page, in the order they were written.
+      // These stay one at a time: each is its own row with its own text, and
+      // there are rarely more than a handful.
       for (let i = 0; i < list.length; i += 1) {
         const item = list[i];
         const change = pending.get(item.image.image_id)!;
-        setSavingImageId(item.image.image_id);
-        // The verdict, if it moved. A staged change back to undecided is
-        // dropped rather than written, and a saved one cannot be cleared.
-        if (change.decision !== null && change.decision !== item.decision) {
-          latest = await verificationService.decideImage(
-            id,
-            item.image.image_id,
-            change.decision === ImageDecision.VERIFIED,
-            token,
-            change.comment,
-          );
-        }
-
-        // Then the notes typed for this page, in the order they were written.
         for (const note of change.notes ?? []) {
+          setSavingImageId(item.image.image_id);
           await verificationService.addComment(id, note, token, item.image.image_id);
         }
         setSavingDecisions({ done: i + 1, total: list.length });

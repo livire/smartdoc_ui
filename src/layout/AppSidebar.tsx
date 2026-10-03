@@ -20,6 +20,7 @@ import {
 import { useSidebar } from "../context/SidebarContext";
 import { useMembership } from "../context/MembershipContext";
 import { useCustomer, storedCustomerUrl } from "../context/CustomerContext";
+import { useTheme } from "../context/ThemeContext";
 
 type NavItem = {
   name: string;
@@ -173,7 +174,11 @@ const AppSidebar: React.FC = () => {
   // categorisation off, "Not categorised" is a finished state, not a wait.
   const [projectName, setProjectName] = useState<string | null>(null);
   // The customer's own logo and name, when they have set them.
-  const [branding, setBranding] = useState<{ label: string | null; logo: string | null }>(
+  const [branding, setBranding] = useState<{
+    label: string | null;
+    logo: string | null;
+    logoDark: string | null;
+  }>(
     () => {
       // Straight from the cache, so the logo is on screen in the first
       // paint rather than after a token and a request.
@@ -188,9 +193,16 @@ const AppSidebar: React.FC = () => {
       return {
         label: cached?.customer_label ?? null,
         logo: cached?.menu_logo ?? cached?.login_logo ?? null,
+        logoDark: cached?.menu_logo_dark ?? cached?.login_logo_dark ?? null,
       };
     },
   );
+  // The customer's mark for the screen somebody is actually on. Falls back
+  // to the light one: most logos read on either background, and a customer
+  // who set only the one should see it rather than nothing.
+  const { theme } = useTheme();
+  const shownLogo = theme === "dark" ? branding.logoDark || branding.logo : branding.logo;
+
   const [autoStages, setAutoStages] = useState<{
     process: boolean;
     analyze: boolean;
@@ -221,6 +233,7 @@ const AppSidebar: React.FC = () => {
           setBranding({
             label: settings?.customer_label ?? null,
             logo: settings?.menu_logo ?? settings?.login_logo ?? null,
+            logoDark: settings?.menu_logo_dark ?? settings?.login_logo_dark ?? null,
           });
         }
       } catch {
@@ -503,7 +516,7 @@ const AppSidebar: React.FC = () => {
         }`}
       >
         <Link to="/" className={!isExpanded && !isHovered ? "" : "block w-full"}>
-          {branding.logo ? (
+          {shownLogo ? (
             // The customer's own logo, set on Customer Settings. One image
             // for both themes — a customer supplies one, not a pair.
             // Given a box and told to fill it: `object-contain` keeps the
@@ -511,7 +524,7 @@ const AppSidebar: React.FC = () => {
             // square, but either one uses the whole space rather than sitting
             // small in the corner.
             <img
-              src={branding.logo}
+              src={shownLogo}
               alt={branding.label ?? "Logo"}
               // Width-driven: the rail's full width, with the height
               // following the picture's own shape. A fixed height meant a

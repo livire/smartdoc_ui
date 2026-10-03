@@ -11,6 +11,7 @@ import { customerService, CustomerDetails } from "../../services/customerService
 import { authService, PASSWORD_CHANGE_REQUIRED } from "../../services/authService";
 import LogoPlaceholder from "../common/LogoPlaceholder";
 import Toast from "../common/Toast";
+import { useTheme } from "../../context/ThemeContext";
 
 export default function SignInForm({
   // The customer this form signs in to, when it is not the one the
@@ -77,7 +78,11 @@ export default function SignInForm({
   const [settingPassword, setSettingPassword] = useState(false);
   // The customer's own logo and name for itself, when they have set them.
   // Read with the service token, since nobody has one of their own yet.
-  const [branding, setBranding] = useState<{ label: string | null; logo: string | null }>(
+  const [branding, setBranding] = useState<{
+    label: string | null;
+    logo: string | null;
+    logoDark: string | null;
+  }>(
     () => {
       // Straight from the cache, so the logo is on screen in the first
       // paint rather than after a token and a request.
@@ -90,9 +95,16 @@ export default function SignInForm({
       return {
         label: cached?.customer_label ?? null,
         logo: cached?.login_logo ?? cached?.menu_logo ?? null,
+        logoDark: cached?.login_logo_dark ?? cached?.menu_logo_dark ?? null,
       };
     },
   );
+
+  // Which mark to draw. Falls back to the light one: most logos read on
+  // either background, and a customer who set only the one should see it
+  // rather than nothing.
+  const { theme } = useTheme();
+  const shownLogo = theme === "dark" ? branding.logoDark || branding.logo : branding.logo;
 
   useEffect(() => {
     if (!customer?.customer_id) return;
@@ -105,6 +117,7 @@ export default function SignInForm({
           setBranding({
             label: settings?.customer_label ?? null,
             logo: settings?.login_logo ?? settings?.menu_logo ?? null,
+            logoDark: settings?.login_logo_dark ?? settings?.menu_logo_dark ?? null,
           });
         }
       } catch {
@@ -122,8 +135,8 @@ export default function SignInForm({
         <div>
           <div className="mb-5 text-center sm:mb-8">
             <div className="mb-4 flex justify-center">
-              {branding.logo ? (
-                <img src={branding.logo} alt="" className="h-20 w-full object-contain" />
+              {shownLogo ? (
+                <img src={shownLogo} alt="" className="h-20 w-full object-contain" />
               ) : (
                 <LogoPlaceholder name={branding.label ?? customer?.customer_name} />
               )}

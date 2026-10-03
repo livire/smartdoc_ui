@@ -161,6 +161,37 @@ export const verificationService = {
     return body.data;
   },
 
+  /**
+   * Accept or reject many documents in one request.
+   *
+   * One request, one transaction, one review built at the end. Sending them
+   * one at a time meant the server rebuilt the entire review per page — on
+   * a 194-page batch, about eleven minutes of it.
+   */
+  async decideImages(
+    assignmentId: number,
+    decisions: {
+      image_id: number;
+      accept: boolean;
+      comment?: string;
+      category_id?: number;
+    }[],
+    accessToken: string
+  ): Promise<Review> {
+    const response = await fetch(`${API_URL}/verification/decide-many`, {
+      method: "POST",
+      headers: jsonHeaders(accessToken),
+      body: JSON.stringify({ assignment_id: assignmentId, decisions }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractMessage(response, "Failed to record the decisions"));
+    }
+
+    const body = await response.json();
+    return body.data;
+  },
+
   // Omit imageId for a comment about the whole batch.
   /**
    * Retire a rejected document that has been re-shot. The replacement is

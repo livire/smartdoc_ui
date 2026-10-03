@@ -65,6 +65,23 @@ export const uploadService = {
   ): Promise<Map<string, string>> {
     if (objectKeys.length === 0) return new Map();
 
+    // The service signs at most 200 keys at a time — each is a signed link,
+    // and a few hundred at once is what the cap is for. A long file is
+    // asked for in runs rather than refused with "Too many keys", which is
+    // a limit of the call and nothing the person did.
+    const PER_REQUEST = 200;
+    if (objectKeys.length > PER_REQUEST) {
+      const all = new Map<string, string>();
+      for (let at = 0; at < objectKeys.length; at += PER_REQUEST) {
+        const run = await this.getDownloadUrls(
+          objectKeys.slice(at, at + PER_REQUEST),
+          accessToken
+        );
+        for (const [key, url] of run) all.set(key, url);
+      }
+      return all;
+    }
+
     const response = await fetch(`${UPLOAD_API_URL}/s3/download-urls`, {
       method: "POST",
       headers: {
@@ -105,12 +122,52 @@ export const uploadService = {
     return body.data?.signedUrl;
   },
 
+  /**
+   * Upload links for a batch of files.
+   *
+   * The service answers for at most 100 at a time, so a bigger batch is
+   * asked for in runs of 100 and the answers joined. It used to be sent as
+   * one request, and a 120-page file came back as "Cannot request more than
+   * 100 files at once" — a limit of the call, told to somebody as though
+   * their documents were the problem.
+   *
+   * The runs go one after another, not all at once: each one is a signed
+   * link per file, and a hundred of those arriving together is what the
+   * limit exists to prevent.
+   */
   async requestUploadUrls(
     projectId: number,
     identifierId: number,
     files: File[],
     accessToken: string
   ): Promise<UploadUrlsResponse> {
+    const PER_REQUEST = 100;
+
+    if (files.length > PER_REQUEST) {
+      const runs: File[][] = [];
+      for (let at = 0; at < files.length; at += PER_REQUEST) {
+        runs.push(files.slice(at, at + PER_REQUEST));
+      }
+
+      let first: UploadUrlsResponse | null = null;
+      const uploads: UploadUrl[] = [];
+
+      for (const run of runs) {
+        const answer = await this.requestUploadUrls(
+          projectId,
+          identifierId,
+          run,
+          accessToken
+        );
+        // The links are what differs between the runs; everything else is
+        // the same answer about the same file, so the first one stands.
+        if (!first) first = answer;
+        uploads.push(...answer.uploads);
+      }
+
+      return { ...(first as UploadUrlsResponse), uploads };
+    }
+
     const fileData = files.map((file) => ({
       originalname: file.name,
       mimetype: file.type,

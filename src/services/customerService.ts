@@ -206,6 +206,9 @@ export const customerService = {
     customer_label: string | null;
     login_logo: string | null;
     menu_logo: string | null;
+    // The same marks for a dark screen. Null falls back to the light ones.
+    login_logo_dark?: string | null;
+    menu_logo_dark?: string | null;
     idle_timeout_minutes?: number;
     password_min_length?: number;
     password_needs_digit?: 0 | 1;

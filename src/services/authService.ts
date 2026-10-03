@@ -36,10 +36,16 @@ export interface UserProject {
   user_project_id: number;
   user_id: number;
   project_id: number;
-  // The capacity this user has on THIS project: 1 = admin, 2 = worker.
-  // Per-project, not per-customer — the same person can run one project and
-  // capture documents on another.
+  // The capacity this user has on THIS project: 1 = admin, 2 = worker,
+  // 4 = viewer. Per-project, not per-customer — the same person can run one
+  // project and capture documents on another.
   role_id: number;
+  // Exceptions for this one person in the reading app. Null means "use
+  // whatever the role gives", which is what every row says until somebody
+  // is told no. Only a viewer's are read.
+  can_comment?: number | null;
+  can_annotate?: number | null;
+  can_forward?: number | null;
 }
 
 export interface UserProjectsResponse {
