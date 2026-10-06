@@ -8,7 +8,7 @@ import Input from "../form/input/InputField";
 import Checkbox from "../form/input/Checkbox";
 import Button from "../ui/button/Button";
 import { customerService, CustomerDetails } from "../../services/customerService";
-import { authService, PASSWORD_CHANGE_REQUIRED } from "../../services/authService";
+import { authService, PASSWORD_CHANGE_REQUIRED, EMAIL_VERIFICATION_REQUIRED } from "../../services/authService";
 import LogoPlaceholder from "../common/LogoPlaceholder";
 import Toast from "../common/Toast";
 import { useTheme } from "../../context/ThemeContext";
@@ -56,8 +56,13 @@ export default function SignInForm({
     try {
       await login(username, password);
     } catch (err) {
-      // The password step is not a failure — they carry on to it.
-      if (forCustomer && !(err instanceof Error && err.name === PASSWORD_CHANGE_REQUIRED)) {
+      // The password step is not a failure — they carry on to it. Nor is
+      // the verification step, where the customer stays chosen so the
+      // address they come back to is the right one.
+      const stepPending =
+        err instanceof Error &&
+        (err.name === PASSWORD_CHANGE_REQUIRED || err.name === EMAIL_VERIFICATION_REQUIRED);
+      if (forCustomer && !stepPending) {
         setCustomer(previous);
       }
       throw err;
@@ -66,6 +71,16 @@ export default function SignInForm({
   const [showPassword, setShowPassword] = useState(false);
   const [isChecked, setIsChecked] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Set when a sign-in stopped because the address is unverified; holds the
+  // username so the link can be sent again without asking for it twice.
+  const [verifyEmailFor, setVerifyEmailFor] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
+  // The forgotten-password panel, shown in place of the form. It is a panel
+  // rather than its own page because /reset-password was a link to a route
+  // that never existed.
+  const [forgetting, setForgetting] = useState(false);
+  const [forgotState, setForgotState] = useState<"idle" | "sending" | "sent">("idle");
+  const [forgotMessage, setForgotMessage] = useState<string>("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   // The second step, shown only when Keycloak accepts the password but
@@ -168,13 +183,115 @@ export default function SignInForm({
                     setChoosingPassword(true);
                     return;
                   }
+                  if (err instanceof Error && err.name === EMAIL_VERIFICATION_REQUIRED) {
+                    // Nothing to do on this screen: the link is in their
+                    // inbox. Offer to send it again, since the usual reason
+                    // somebody is here is that it never arrived.
+                    setVerifyEmailFor(username);
+                    return;
+                  }
                   const message =
                     err instanceof Error ? err.message : "Login failed";
                   setFormError(message);
                 }
               }}
             >
-              {choosingPassword ? (
+              {forgetting ? (
+              <div className="space-y-5">
+                <div className="p-3 rounded-lg bg-brand-50 dark:bg-brand-500/10">
+                  <p className="text-sm text-gray-700 dark:text-gray-300">
+                    Enter your username and we will email you a link to set a new password.
+                  </p>
+                </div>
+                <div>
+                  <Label>
+                    Username <span className="text-error-500">*</span>
+                  </Label>
+                  <Input
+                    placeholder="Your username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                  />
+                </div>
+                {forgotState === "sent" && (
+                  <p className="text-sm text-gray-700 dark:text-gray-300">{forgotMessage}</p>
+                )}
+                <Button
+                  type="button"
+                  className="w-full"
+                  size="sm"
+                  disabled={!username.trim() || forgotState === "sending"}
+                  onClick={async () => {
+                    setFormError(null);
+                    setForgotState("sending");
+                    try {
+                      const answer = await authService.forgotPassword(username.trim());
+                      setForgotMessage(answer);
+                      setForgotState("sent");
+                    } catch (err) {
+                      setForgotState("idle");
+                      setFormError(err instanceof Error ? err.message : "Could not send the email");
+                    }
+                  }}
+                >
+                  {forgotState === "sending" ? "Sending..." : "Email me a link"}
+                </Button>
+                <button
+                  type="button"
+                  className="text-sm text-brand-500 hover:text-brand-600"
+                  onClick={() => {
+                    setForgetting(false);
+                    setForgotState("idle");
+                  }}
+                >
+                  Back to sign in
+                </button>
+              </div>
+              ) : verifyEmailFor ? (
+              <div className="space-y-5">
+                <div className="p-3 rounded-lg bg-brand-50 dark:bg-brand-500/10">
+                  <p className="text-sm text-gray-700 dark:text-gray-300">
+                    Check your email and follow the link to verify your address.
+                    You can sign in once that is done.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    className="w-full"
+                    size="sm"
+                    disabled={resendState === "sending"}
+                    onClick={async () => {
+                      setFormError(null);
+                      setResendState("sending");
+                      try {
+                        await authService.resendVerification(verifyEmailFor);
+                        setResendState("sent");
+                      } catch (err) {
+                        setResendState("idle");
+                        setFormError(err instanceof Error ? err.message : "Could not send the email");
+                      }
+                    }}
+                  >
+                    {resendState === "sending"
+                      ? "Sending..."
+                      : resendState === "sent"
+                        ? "Sent — check your inbox"
+                        : "Send the link again"}
+                  </Button>
+                </div>
+                <button
+                  type="button"
+                  className="text-sm text-brand-500 hover:text-brand-600"
+                  onClick={() => {
+                    setVerifyEmailFor(null);
+                    setResendState("idle");
+                  }}
+                >
+                  Back to sign in
+                </button>
+              </div>
+              ) : choosingPassword ? (
               <div className="space-y-6">
                 <div className="p-3 rounded-lg bg-brand-50 dark:bg-brand-500/10">
                   <p className="text-sm text-gray-700 dark:text-gray-300">
@@ -227,6 +344,15 @@ export default function SignInForm({
                         await signIn(username, newPassword);
                         window.location.reload();
                       } catch (err) {
+                        // The password was set but the address is still
+                        // unverified. Not an error to show in red: say what
+                        // is left instead, on the panel that can resend the
+                        // link.
+                        if (err instanceof Error && err.name === EMAIL_VERIFICATION_REQUIRED) {
+                          setChoosingPassword(false);
+                          setVerifyEmailFor(username);
+                          return;
+                        }
                         setFormError(
                           err instanceof Error ? err.message : "Could not set the new password",
                         );
@@ -298,12 +424,17 @@ export default function SignInForm({
                       Keep me logged in
                     </span>
                   </div>
-                  <Link
-                    to="/reset-password"
+                  <button
+                    type="button"
                     className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400"
+                    onClick={() => {
+                      setFormError(null);
+                      setForgotState("idle");
+                      setForgetting(true);
+                    }}
                   >
                     Forgot password?
-                  </Link>
+                  </button>
                 </div>
                 <div>
                   <Button

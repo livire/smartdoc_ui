@@ -115,7 +115,13 @@ and email columns rather than failing to load.
 Rows are matched on `keycloak_id`, falling back to username for legacy rows
 created before that column existed.
 
-**Passwords are set here too, and only here** — the lock button beside each
+**A new account is not given a password (2026-10-06).** The Add New User
+dialog asks for username and email; `auth_api` creates the account with no
+credentials and emails one link that both verifies the address and sets a
+password. Email is required for that reason. The "Not verified" mark beside
+an address is a button that sends the link again.
+
+**Passwords are set here too** — the lock button beside each
 row, which opens with a generated password ready to copy rather than an
 empty field. It calls `auth_api`'s `POST /set_password` with the caller's own token,
 so Keycloak decides who may; the password is always temporary, meaning the

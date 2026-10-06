@@ -40,6 +40,8 @@ export interface KeycloakUser {
   lastName?: string;
   enabled: boolean;
   emailVerified: boolean;
+  // Present only on creation: whether the verification email went out.
+  verification?: "sent" | "failed";
   // When the account was made, in milliseconds. Keycloak's, because the
   // app's own `user` table records no date — and the account is created
   // there first.
@@ -256,9 +258,19 @@ export const userManagementService = {
         email: input.email,
         firstName: input.firstName,
         lastName: input.lastName,
-        password: input.password,
+        // No password: the invitation email carries a link that sets one.
+        // An administrator typing a password here has to then read it out
+        // or send it in a message, which is what this replaces. The lock
+        // button on the Users screen is still there for a reset.
+        ...(input.password ? { password: input.password } : {}),
         enabled: true,
         emailVerified: false,
+        // Email the new account a link to verify its address. This also
+        // records VERIFY_EMAIL against the user, so they cannot sign in
+        // until they follow it — which is why the dialog says so. A failed
+        // send does not fail the creation; the answer carries
+        // `verification: "failed"` and the screen reports it.
+        send_verification: true,
       }),
     });
 

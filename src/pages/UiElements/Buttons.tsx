@@ -8,7 +8,7 @@ export default function Buttons() {
     <div>
       <PageMeta
         title="Buttons | SmartDoc"
-        description="SmartDoc"
+        description="Button styles from the UI kit"
       />
       <div className="space-y-5 sm:space-y-6">
         {/* Primary Button */}

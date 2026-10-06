@@ -65,6 +65,22 @@ export class PasswordChangeRequiredError extends Error {
   }
 }
 
+// The other reason Keycloak refuses a sign-in with the same words: the
+// address on the account has not been verified. There is nothing the form
+// can do about it here — the link is in the person's inbox — so the screen
+// says so and offers to send it again.
+export const EMAIL_VERIFICATION_REQUIRED = "EmailVerificationRequired";
+
+export class EmailVerificationRequiredError extends Error {
+  readonly username: string;
+
+  constructor(username: string) {
+    super("Check your email and follow the link to verify your address, then sign in");
+    this.name = EMAIL_VERIFICATION_REQUIRED;
+    this.username = username;
+  }
+}
+
 export const authService = {
   async login(credentials: LoginRequest): Promise<TokenResponse> {
     const response = await fetch(`${API_BASE_URL}/user_token`, {
@@ -83,13 +99,25 @@ export const authService = {
       // password waiting to be changed are three different things to do
       // next, and "Login failed" said none of them.
       let message = "Login failed";
+      let actionRequired: string[] = [];
       try {
         const body = await response.json();
         if (typeof body?.message === "string" && body.message) message = body.message;
+        if (Array.isArray(body?.action_required)) actionRequired = body.action_required;
       } catch {
         // No body worth reading; the generic message stands.
       }
-      if (/not fully set up/i.test(message)) throw new PasswordChangeRequiredError();
+      // "Account is not fully set up" is Keycloak's wording for every
+      // pending step, so it cannot be acted on by itself — choosing a
+      // password and verifying an address are different screens. auth_api
+      // says which step it is; the message alone is the fallback for an
+      // older auth_api that does not.
+      if (actionRequired.includes("VERIFY_EMAIL")) {
+        throw new EmailVerificationRequiredError(credentials.username);
+      }
+      if (actionRequired.includes("UPDATE_PASSWORD") || /not fully set up/i.test(message)) {
+        throw new PasswordChangeRequiredError();
+      }
       throw new Error(message);
     }
 
@@ -104,6 +132,33 @@ export const authService = {
    * tokens come back exactly as from `login`, so the caller carries on the
    * same way.
    */
+  /** Send the address-verification email again. */
+  async resendVerification(username: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/send_verification`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.message || "Could not send the verification email");
+    }
+  },
+
+  /** Ask for a link to set a new password. Answers the same either way. */
+  async forgotPassword(username: string): Promise<string> {
+    const response = await fetch(`${API_BASE_URL}/forgot_password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(body?.message || "Could not send the email");
+    }
+    return body?.data?.message || "If that account exists, a link is on its way.";
+  },
+
   async completePassword(username: string, password: string, newPassword: string): Promise<TokenResponse> {
     const response = await fetch(`${API_BASE_URL}/complete_password`, {
       method: "POST",
@@ -122,7 +177,19 @@ export const authService = {
       throw new Error(message);
     }
 
-    return response.json();
+    const body = await response.json();
+
+    // The password was set, but another step still blocks sign-in — an
+    // unverified address, today. A 200 with no tokens is not a failure and
+    // must not be reported as one: the password really did change, and
+    // telling somebody otherwise leaves them typing the old one.
+    if (!body?.data?.access_token) {
+      const pending: string[] = body?.data?.action_required ?? [];
+      if (pending.includes("VERIFY_EMAIL")) throw new EmailVerificationRequiredError(username);
+      throw new Error(body?.data?.message || "Your password is set, but the account is not ready yet");
+    }
+
+    return body;
   },
 
   /** Their own first and last name; who "they" are comes from the token. */

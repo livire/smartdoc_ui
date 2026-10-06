@@ -7,7 +7,7 @@ export default function Avatars() {
     <>
       <PageMeta
         title="Avatars | SmartDoc"
-        description="SmartDoc"
+        description="Avatar styles from the UI kit"
       />
       <div className="space-y-5 sm:space-y-6">
         <ComponentCard title="Default Avatar">

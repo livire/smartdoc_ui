@@ -9,7 +9,7 @@ export default function Images() {
     <>
       <PageMeta
         title="Images | SmartDoc"
-        description="SmartDoc"
+        description="Image styles from the UI kit"
       />
       <div className="space-y-5 sm:space-y-6">
         <ComponentCard title="Responsive image">

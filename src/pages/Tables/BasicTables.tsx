@@ -7,7 +7,7 @@ export default function BasicTables() {
     <>
       <PageMeta
         title="Basic Tables | SmartDoc"
-        description="SmartDoc"
+        description="Table styles from the UI kit"
       />
       <div className="space-y-6">
         <ComponentCard title="Basic Table 1">

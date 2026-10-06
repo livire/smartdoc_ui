@@ -167,7 +167,7 @@ export default function SystemModels() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-gray-50 dark:bg-gray-900">
-      <PageMeta title="AI Models | SmartDoc System Admin" description="The models SmartDoc can use" />
+      <PageMeta title="AI Models | SmartDoc System" description="The models SmartDoc can use" />
 
       <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-2.5 dark:border-gray-800 dark:bg-gray-800">
         <div className="w-56">

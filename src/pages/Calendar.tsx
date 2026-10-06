@@ -119,7 +119,7 @@ const Calendar: React.FC = () => {
     <>
       <PageMeta
         title="Calendar | SmartDoc"
-        description="SmartDoc"
+        description="A calendar from the UI kit"
       />
       <div className="rounded-2xl border  border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         <div className="custom-calendar">

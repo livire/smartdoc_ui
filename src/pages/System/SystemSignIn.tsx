@@ -92,7 +92,7 @@ export default function SystemSignIn() {
 
   return (
     <>
-      <PageMeta title="SmartDoc | System Admin" description="Sign in to SmartDoc" />
+      <PageMeta title="Sign in | SmartDoc System" description="Sign in to SmartDoc" />
       <AuthLayout>
         <div className="flex flex-1 flex-col justify-center">
           <div className="mx-auto w-full max-w-md">

@@ -8,7 +8,7 @@ export default function Workspace() {
     <>
       <PageMeta
         title="My Workspace | SmartDoc"
-        description="My Workspace page"
+        description="Everything waiting for you"
       />
       <div className="mx-auto max-w-screen-2xl p-4 md:p-6 2xl:p-10">
         <div className="mb-6">

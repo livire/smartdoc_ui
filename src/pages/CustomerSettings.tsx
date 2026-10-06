@@ -105,6 +105,11 @@ export default function CustomerSettings() {
         is_active: active ? 1 : 0,
       });
       setToast({ message: "Customer saved", type: "success" });
+      // The cached copy is now wrong. Held for the life of the tab, so
+      // without this the sidebar and the sign-in page would go on showing
+      // the old name until a reload.
+      customerService.forgetCustomer(customer.customer_url);
+      if (cleanUrl !== customer.customer_url) customerService.forgetCustomer(cleanUrl);
       // A changed address means every screen is now under the wrong one.
       if (cleanUrl !== customer.customer_url) {
         window.location.assign(`/${cleanUrl}/customer-settings`);

@@ -150,6 +150,9 @@ export default function Users({
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [newUser, setNewUser] = useState(emptyNewUser);
   const [creatingUser, setCreatingUser] = useState(false);
+  // Which person's verification link is being sent, so only their own mark
+  // reads "Sending...".
+  const [resendingFor, setResendingFor] = useState<string | null>(null);
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editUsername, setEditUsername] = useState("");
@@ -386,8 +389,22 @@ export default function Users({
     e.preventDefault();
     if (!customer) return;
 
-    if (!newUser.username.trim() || !newUser.password) {
-      setToast({ message: "Username and password are required", type: "error" });
+    // An email address is what makes the account reachable now: the link
+    // that sets its password goes there. Without one there is nothing to
+    // send and no way to hand the account over.
+    // Email is what makes the account reachable: the link that sets its
+    // password goes there. The names are required because they are what
+    // everyone else sees — a comment author, a forward's sender, this list —
+    // and because `auth_api`'s /update_profile already refuses to clear
+    // them, so an account could be created in a state its owner could not
+    // save.
+    if (
+      !newUser.username.trim() ||
+      !newUser.email.trim() ||
+      !newUser.firstName.trim() ||
+      !newUser.lastName.trim()
+    ) {
+      setToast({ message: "Username, email and name are required", type: "error" });
       return;
     }
 
@@ -433,7 +450,20 @@ export default function Users({
       return;
     }
 
-    setToast({ message: `User "${keycloakUser.username}" created successfully`, type: "success" });
+    // Say whether the verification email went out. Silence here would leave
+    // an administrator thinking the person has a link when they do not, and
+    // that person cannot sign in until they follow one.
+    setToast(
+      keycloakUser.verification === "failed"
+        ? {
+            message: `User "${keycloakUser.username}" was created, but the verification email could not be sent. Use the envelope beside their name to try again.`,
+            type: "error",
+          }
+        : {
+            message: `User "${keycloakUser.username}" created. A link to verify their email is on its way.`,
+            type: "success",
+          }
+    );
     setIsAddUserOpen(false);
     setNewUser(emptyNewUser);
     setCreatingUser(false);
@@ -473,7 +503,7 @@ export default function Users({
 
   return (
     <div className="flex flex-col flex-1 w-full bg-gray-50 dark:bg-gray-900 overflow-hidden min-w-0 min-h-0">
-      <PageMeta title="Users | SmartDoc" description="Manage users for this project" />
+      <PageMeta title="Users | SmartDoc" description="The people who work on this customer" />
 
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-2.5 min-w-0 flex-shrink-0 overflow-hidden w-full">
@@ -634,12 +664,36 @@ export default function Users({
                               notice would go astray, so it is worth a mark
                               beside the address rather than a column. */}
                           {detailsFor(u)?.email && detailsFor(u)?.emailVerified === false && (
-                            <span
-                              title="Email not verified"
-                              className="rounded-full border border-warning-500/40 bg-warning-500/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-600"
+                            // The mark is the button: an administrator who
+                            // notices it is usually about to ask for the
+                            // link to be sent again, and a separate icon
+                            // would be a second small target for the same
+                            // thought.
+                            <button
+                              type="button"
+                              disabled={resendingFor === u.username}
+                              title="Email not verified — click to send the link again"
+                              onClick={async () => {
+                                setResendingFor(u.username);
+                                try {
+                                  await authService.resendVerification(u.username);
+                                  setToast({
+                                    message: `Verification link sent to ${detailsFor(u)?.email}.`,
+                                    type: "success",
+                                  });
+                                } catch (err) {
+                                  setToast({
+                                    message: err instanceof Error ? err.message : "Could not send the email",
+                                    type: "error",
+                                  });
+                                } finally {
+                                  setResendingFor(null);
+                                }
+                              }}
+                              className="rounded-full border border-warning-500/40 bg-warning-500/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-600 transition hover:bg-warning-500/20 disabled:opacity-60"
                             >
-                              Not verified
-                            </span>
+                              {resendingFor === u.username ? "Sending..." : "Not verified"}
+                            </button>
                           )}
                         </span>
                       </TableCell>
@@ -850,7 +904,7 @@ export default function Users({
             />
           </div>
           <div>
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="email">Email *</Label>
             <Input
               id="email"
               type="email"
@@ -860,7 +914,7 @@ export default function Users({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="firstName">First Name</Label>
+              <Label htmlFor="firstName">First Name *</Label>
               <Input
                 id="firstName"
                 value={newUser.firstName}
@@ -868,22 +922,13 @@ export default function Users({
               />
             </div>
             <div>
-              <Label htmlFor="lastName">Last Name</Label>
+              <Label htmlFor="lastName">Last Name *</Label>
               <Input
                 id="lastName"
                 value={newUser.lastName}
                 onChange={(e) => setNewUser({ ...newUser, lastName: e.target.value })}
               />
             </div>
-          </div>
-          <div>
-            <Label htmlFor="password">Password *</Label>
-            <Input
-              id="password"
-              type="password"
-              value={newUser.password}
-              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-            />
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <Button

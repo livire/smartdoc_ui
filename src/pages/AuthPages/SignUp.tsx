@@ -6,8 +6,8 @@ export default function SignUp() {
   return (
     <>
       <PageMeta
-        title="SignUp | SmartDoc"
-        description="SmartDoc"
+        title="Sign up | SmartDoc"
+        description="Create a SmartDoc account"
       />
       <AuthLayout>
         <SignUpForm />

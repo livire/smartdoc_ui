@@ -9,8 +9,8 @@ export default function Videos() {
   return (
     <>
       <PageMeta
-        title="React.js Videos Tabs | SmartDoc"
-        description="SmartDoc"
+        title="Videos | SmartDoc"
+        description="Video embeds from the UI kit"
       />
       <div className="grid grid-cols-1 gap-5 sm:gap-6 xl:grid-cols-2">
         <div className="space-y-5 sm:space-y-6">

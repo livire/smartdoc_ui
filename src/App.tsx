@@ -1,51 +1,50 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router";
 import SignIn from "./pages/AuthPages/SignIn";
 import SignInWithCustomer from "./pages/AuthPages/SignInWithCustomer";
-import ProjectSelection from "./pages/AuthPages/ProjectSelection";
 import SystemSignIn from "./pages/System/SystemSignIn";
 import HomeRedirect from "./pages/HomeRedirect";
-import SystemCustomers from "./pages/System/SystemCustomers";
 import SystemLayout from "./pages/System/SystemLayout";
-import SystemModels from "./pages/System/SystemModels";
-import SignUp from "./pages/AuthPages/SignUp";
-import Digitize from "./pages/Digitize";
-import Users from "./pages/Users";
-import UserAccess from "./pages/UserAccess";
-import Projects from "./pages/Projects";
-import Identifiers from "./pages/Identifiers";
-import Attributes from "./pages/Attributes";
-import Categories from "./pages/Categories";
-import Storage from "./pages/Storage";
-import CustomerSettings from "./pages/CustomerSettings";
-import Assignments from "./pages/Assignments";
-import ArrangeFile from "./pages/ArrangeFile";
-import VerifyBatch from "./pages/VerifyBatch";
-import MyAssignments from "./pages/MyAssignments";
-import NotRecorded from "./pages/NotRecorded";
 import NotFound from "./pages/OtherPage/NotFound";
-import UserProfiles from "./pages/UserProfiles";
-import Workspace from "./pages/Workspace";
-import Videos from "./pages/UiElements/Videos";
-import Images from "./pages/UiElements/Images";
-import Alerts from "./pages/UiElements/Alerts";
-import Badges from "./pages/UiElements/Badges";
-import Avatars from "./pages/UiElements/Avatars";
-import Buttons from "./pages/UiElements/Buttons";
-import LineChart from "./pages/Charts/LineChart";
-import BarChart from "./pages/Charts/BarChart";
-import Calendar from "./pages/Calendar";
-import BasicTables from "./pages/Tables/BasicTables";
-import FormElements from "./pages/Forms/FormElements";
-import Blank from "./pages/Blank";
 import AppLayout from "./layout/AppLayout";
 import { ScrollToTop } from "./components/common/ScrollToTop";
-import Home from "./pages/Dashboard/Home";
 import { AuthProvider } from "./context/AuthContext";
 import { CustomerProvider } from "./context/CustomerContext";
 import { ProjectProvider } from "./context/ProjectContext";
 import { MembershipProvider } from "./context/MembershipContext";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import SessionExpiredPrompt from "./components/auth/SessionExpiredPrompt";
+
+/**
+ * Every screen behind sign-in is fetched when it is first opened, not when
+ * the app loads.
+ *
+ * Without this, somebody looking at the sign-in form downloads Digitize, the
+ * verification screen and every setup page before they can type a username.
+ * The sign-in pages themselves stay eager — splitting the first screen only
+ * adds a round trip before anything can be drawn.
+ */
+const ProjectSelection = lazy(() => import("./pages/AuthPages/ProjectSelection"));
+const SystemCustomers = lazy(() => import("./pages/System/SystemCustomers"));
+const SystemModels = lazy(() => import("./pages/System/SystemModels"));
+const SignUp = lazy(() => import("./pages/AuthPages/SignUp"));
+const Digitize = lazy(() => import("./pages/Digitize"));
+const Users = lazy(() => import("./pages/Users"));
+const UserAccess = lazy(() => import("./pages/UserAccess"));
+const Projects = lazy(() => import("./pages/Projects"));
+const Identifiers = lazy(() => import("./pages/Identifiers"));
+const Attributes = lazy(() => import("./pages/Attributes"));
+const Categories = lazy(() => import("./pages/Categories"));
+const Storage = lazy(() => import("./pages/Storage"));
+const CustomerSettings = lazy(() => import("./pages/CustomerSettings"));
+const Assignments = lazy(() => import("./pages/Assignments"));
+const ArrangeFile = lazy(() => import("./pages/ArrangeFile"));
+const VerifyBatch = lazy(() => import("./pages/VerifyBatch"));
+const MyAssignments = lazy(() => import("./pages/MyAssignments"));
+const NotRecorded = lazy(() => import("./pages/NotRecorded"));
+const UserProfiles = lazy(() => import("./pages/UserProfiles"));
+const Workspace = lazy(() => import("./pages/Workspace"));
+const Home = lazy(() => import("./pages/Dashboard/Home"));
 
 export default function App() {
   return (
@@ -58,6 +57,17 @@ export default function App() {
           {/* Sits above every screen: an expired session asks for a password
               here instead of throwing anyone back to sign-in. */}
           <SessionExpiredPrompt />
+          {/* Shown while a screen is being fetched. Deliberately plain and
+              unbranded: it is on screen for a few hundred milliseconds on a
+              first visit and never again, and a logo that flashes there
+              looks like a fault. */}
+          <Suspense
+            fallback={
+              <div className="flex min-h-[60vh] items-center justify-center">
+                <span className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500 dark:border-gray-700 dark:border-t-brand-400" />
+              </div>
+            }
+          >
           <Routes>
           {/* Customer-Specific Route (signin/dashboard - accessible to everyone) */}
           <Route path="/:customerUrl" element={<SignInWithCustomer />} />
@@ -96,16 +106,6 @@ export default function App() {
             {/* Others Page */}
             <Route path="/:customerUrl/profile" element={<UserProfiles />} />
 
-            <Route path="/:customerUrl/calendar" element={<Calendar />} />
-
-            <Route path="/:customerUrl/blank" element={<Blank />} />
-
-            {/* Forms */}
-            <Route path="/:customerUrl/form-elements" element={<FormElements />} />
-
-            {/* Tables */}
-            <Route path="/:customerUrl/basic-tables" element={<BasicTables />} />
-
             {/* Documents */}
             <Route path="/:customerUrl/digitize" element={<Digitize />} />
 
@@ -142,23 +142,6 @@ export default function App() {
                 /digitize opens the assignment you're capturing. */}
             <Route path="/:customerUrl/verify" element={<VerifyBatch />} />
 
-            {/* Ui Elements */}
-            <Route path="/:customerUrl/alerts" element={<Alerts />} />
-
-            <Route path="/:customerUrl/avatars" element={<Avatars />} />
-
-            <Route path="/:customerUrl/badge" element={<Badges />} />
-
-            <Route path="/:customerUrl/buttons" element={<Buttons />} />
-
-            <Route path="/:customerUrl/images" element={<Images />} />
-
-            <Route path="/:customerUrl/videos" element={<Videos />} />
-
-            {/* Charts */}
-            <Route path="/:customerUrl/line-chart" element={<LineChart />} />
-
-            <Route path="/:customerUrl/bar-chart" element={<BarChart />} />
           </Route>
 
           {/* Signin Entry Point */}
@@ -168,6 +151,7 @@ export default function App() {
           {/* Fallback Route */}
           <Route path="*" element={<NotFound />} />
         </Routes>
+          </Suspense>
           </Router>
           </MembershipProvider>
         </ProjectProvider>

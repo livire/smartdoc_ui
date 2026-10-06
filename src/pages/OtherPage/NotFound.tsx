@@ -6,8 +6,8 @@ export default function NotFound() {
   return (
     <>
       <PageMeta
-        title="404 | SmartDoc"
-        description="SmartDoc"
+        title="Page not found | SmartDoc"
+        description="That address does not exist"
       />
       <div className="relative flex flex-col items-center justify-center min-h-screen p-6 overflow-hidden z-1">
         <GridShape />

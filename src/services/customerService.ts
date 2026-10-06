@@ -1,3 +1,4 @@
+import { cached, SHORT, FOREVER, forget } from "./cache";
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL;
 
@@ -36,31 +37,65 @@ let cachedServiceToken: string | null = null;
 let serviceTokenExpiry: number | null = null;
 
 export const customerService = {
+  /**
+   * The service token the sign-in page uses before anybody has one of their
+   * own.
+   *
+   * Two caches, and they do different jobs. The expiry below is what stops
+   * us asking again for a token that is still good. `cached` is what stops
+   * two callers starting at the same moment from each making a request —
+   * the old code held only the value, so both missed and both fetched, and
+   * each paid a CORS preflight on top.
+   */
   async getServiceToken(): Promise<string> {
     // Return cached token if still valid
     if (cachedServiceToken && serviceTokenExpiry && Date.now() < serviceTokenExpiry) {
       return cachedServiceToken;
     }
 
-    const response = await fetch(`${AUTH_API_URL}/service_token`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+    return cached("service_token", SHORT, async () => {
+      const response = await fetch(`${AUTH_API_URL}/service_token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to get service token");
+      }
+
+      const data: ServiceTokenResponse = await response.json();
+      cachedServiceToken = data.data.access_token;
+      serviceTokenExpiry = data.data.token_expiry;
+
+      // The token is now held by expiry above, so the shared promise has
+      // done its job and should not outlive the token it carries.
+      forget("service_token");
+      return cachedServiceToken;
     });
-
-    if (!response.ok) {
-      throw new Error("Failed to get service token");
-    }
-
-    const data: ServiceTokenResponse = await response.json();
-    cachedServiceToken = data.data.access_token;
-    serviceTokenExpiry = data.data.token_expiry;
-
-    return cachedServiceToken;
   },
 
-  async getCustomerByUrl(
+  /**
+   * One customer, by the url they sign in at.
+   *
+   * Cached for the life of the tab: four screens ask for it — the sign-in
+   * page, the sidebar, Projects and Customer Settings — and a customer's
+   * row does not change while somebody is looking at it. Customer Settings
+   * clears it after a save, which is the one place it can change.
+   */
+  async getCustomerByUrl(customerUrl: string): Promise<CustomerResponse> {
+    return cached(`customer:${customerUrl}`, FOREVER, () =>
+      this.fetchCustomerByUrl(customerUrl)
+    );
+  },
+
+  /** Forget a cached customer — after its branding or settings are saved. */
+  forgetCustomer(customerUrl: string) {
+    forget(`customer:${customerUrl}`);
+  },
+
+  async fetchCustomerByUrl(
     customerUrl: string
   ): Promise<CustomerResponse> {
     const token = await this.getServiceToken();

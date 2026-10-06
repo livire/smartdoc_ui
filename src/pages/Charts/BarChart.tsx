@@ -6,8 +6,8 @@ export default function BarChart() {
   return (
     <div>
       <PageMeta
-        title="Chart | SmartDoc"
-        description="SmartDoc"
+        title="Bar Chart | SmartDoc"
+        description="Bar chart from the UI kit"
       />
       <div className="space-y-6">
         <ComponentCard title="Bar Chart 1">

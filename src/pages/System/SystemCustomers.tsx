@@ -124,7 +124,7 @@ export default function SystemCustomers() {
 
   return (
     <>
-      <PageMeta title="Customers | SmartDoc System Admin" description="Every customer" />
+      <PageMeta title="Customers | SmartDoc System" description="Every customer" />
 
         <div className="flex min-h-0 flex-1">
           {/* The list, and the customer being looked at beside it. One

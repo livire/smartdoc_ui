@@ -8,7 +8,7 @@ export default function Badges() {
     <div>
       <PageMeta
         title="Badges | SmartDoc"
-        description="SmartDoc"
+        description="Badge styles from the UI kit"
       />
       <div className="space-y-5 sm:space-y-6">
         <ComponentCard title="With Light Background">

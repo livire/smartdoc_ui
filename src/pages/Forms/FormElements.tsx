@@ -15,7 +15,7 @@ export default function FormElements() {
     <div>
       <PageMeta
         title="Form Elements | SmartDoc"
-        description="SmartDoc"
+        description="Form controls from the UI kit"
       />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <div className="space-y-6">

@@ -6,8 +6,8 @@ export default function SignIn() {
   return (
     <>
       <PageMeta
-        title="SignIn | SmartDoc"
-        description="SmartDoc"
+        title="Sign in | SmartDoc"
+        description="Sign in to SmartDoc"
       />
       <AuthLayout>
         <SignInForm />

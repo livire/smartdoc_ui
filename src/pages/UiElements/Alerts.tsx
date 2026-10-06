@@ -7,7 +7,7 @@ export default function Alerts() {
     <>
       <PageMeta
         title="Alerts | SmartDoc"
-        description="SmartDoc"
+        description="Alert styles from the UI kit"
       />
       <div className="space-y-5 sm:space-y-6">
         <ComponentCard title="Success Alert">

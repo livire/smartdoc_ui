@@ -628,7 +628,7 @@ export default function VerifyBatch() {
 
   return (
     <div className="flex flex-col flex-1 w-full bg-gray-50 dark:bg-gray-900 overflow-hidden min-w-0 min-h-0">
-      <PageMeta title="Verify batch | SmartDoc" description="Verify a batch of documents" />
+      <PageMeta title="Verify Batch | SmartDoc" description="Verify a batch of documents" />
 
       {/* Header: what this is, and the two ways out */}
       <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-gray-200 bg-white px-6 py-3 dark:border-gray-700 dark:bg-gray-800">
