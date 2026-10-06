@@ -94,6 +94,15 @@ export interface Review {
   };
   active_verify_stage_id: number | null;
   stages: ReviewStage[];
+  // Which pipeline stages this project runs, answered by the API rather than
+  // worked out here from the project's settings. Without it a grey chip means
+  // both "this stage is off" and "it has not run yet", and the screen cannot
+  // tell anybody which.
+  auto_stages: {
+    enhance: boolean;
+    categorise: boolean;
+    ocr: boolean;
+  };
   batch_comments: ReviewComment[];
   images: ReviewImage[];
   // Pages sent back and since replaced. Not part of the batch any more, but

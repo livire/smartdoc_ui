@@ -19,6 +19,7 @@ function StateChips({
   onOpen,
   pendingCategoryName = null,
   className = "",
+  autoStages = null,
 }: {
   item: ReviewImage;
   // Clicking a chip opens the document full size, where the category can be
@@ -29,6 +30,10 @@ function StateChips({
   // saved one, in red, so an unsaved pick can't be mistaken for a stored one.
   pendingCategoryName?: string | null;
   className?: string;
+  // Which stages this project runs, from the API. Null until the review has
+  // loaded, and then the tooltip can say whether a grey chip is a stage that
+  // is switched off or one that has not run yet.
+  autoStages?: Review["auto_stages"] | null;
 }) {
   const states: [string, boolean][] = [
     ["Enhanced", Boolean(item.enhanced)],
@@ -77,6 +82,19 @@ function StateChips({
             : label === "OCR"
               ? item.ocr_failed
               : item.enhance_failed;
+
+        // Whether this project runs the stage at all. A stage that is off is
+        // grey forever and that is correct — but the tooltip has to say so,
+        // or grey means both "off" and "not yet" with nothing to tell them
+        // apart.
+        const runsStage =
+          autoStages === null
+            ? true
+            : label === "Categorised"
+              ? autoStages.categorise
+              : label === "OCR"
+                ? autoStages.ocr
+                : autoStages.enhance;
         const colour =
           done && !unsaved
             ? "border-success-500/40 bg-success-500/15 text-success-600 dark:text-success-500"
@@ -110,6 +128,14 @@ function StateChips({
                         ? "Reading the text"
                         : "Enhancement"
                   } failed on this document — ask again from the tab row, or do it by hand`
+                : !runsStage
+                ? `${
+                    label === "Categorised"
+                      ? "Categorisation"
+                      : label === "OCR"
+                        ? "Reading the text"
+                        : "Enhancement"
+                  } is switched off for this project — nothing is waiting on it. Click to open full size`
                 : label === "Categorised"
                 ? `${text} — click to open full size and pick a category`
                 : label === "OCR"
@@ -127,7 +153,11 @@ function StateChips({
         ) : (
           <span
             key={label}
-            title={text}
+            title={
+              !runsStage
+                ? `${text} — switched off for this project`
+                : text
+            }
             className={`${shape} ${colour}`}
           >
             {text}
@@ -1748,6 +1778,7 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
                   editable={!locked(selected)}
                   onOpen={() => setOpenItem(selected)}
                   pendingCategoryName={pendingIsChange ? pendingName : null}
+                  autoStages={review?.auto_stages ?? null}
                 />
                 {/* A stage that gave up already says so on its own chip
                     above (a red "Category"), and asking again is one
