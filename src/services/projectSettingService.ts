@@ -49,7 +49,30 @@ export interface ProjectSetting {
   vault_path?: string;
 }
 
+/** What this installation can carry, end to end. */
+export interface InstallationLimits {
+  max_file_bytes: number;
+  max_file_mb: number;
+}
+
 export const projectSettingService = {
+  /**
+   * The largest document this installation can carry.
+   *
+   * Asked for rather than read from this app's own `.env`. The number is
+   * nginx's and `smartdoc_upload_api` enforces it; it used to be copied into
+   * three `.env` files that had to agree, so raising one left the other two
+   * refusing with no explanation anybody could find.
+   */
+  async limits(accessToken: string): Promise<InstallationLimits> {
+    const response = await fetch(`${API_URL}/project_setting/limits`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) throw new Error("Could not read the installation's file size limit");
+    const body = await response.json();
+    return body.data as InstallationLimits;
+  },
+
   // Returns null when a project has no settings row yet — a project created
   // before this screen existed, or one whose setup was never finished.
   async getByProject(projectId: number, accessToken: string): Promise<ProjectSetting | null> {

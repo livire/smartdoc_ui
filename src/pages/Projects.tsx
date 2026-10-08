@@ -38,9 +38,11 @@ const emptyNewProject = {
 // the same number nginx and the upload service are set up for. The API
 // refuses a project limit above it; this is only so the field can say so
 // before anyone presses Save.
-const MAX_FILE_MB_CEILING = Math.floor(
-  Number(import.meta.env.VITE_MAX_FILE_BYTES) / (1024 * 1024),
-);
+// Asked for once when the screen opens, not read from this app's own .env:
+// the number is nginx's, enforced by smartdoc_upload_api, and used to be
+// copied into three files that had to agree. Until it arrives the field has
+// no cap of its own — the server refuses anything too big either way.
+const NO_CEILING_YET = 0;
 
 const DEFAULT_AUTOMATION = {
   auto_process: true,
@@ -147,6 +149,26 @@ export default function Projects() {
   const [setting, setSetting] = useState<ProjectSetting | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  // The largest document this installation carries, from the server.
+  const [maxFileMbCeiling, setMaxFileMbCeiling] = useState(NO_CEILING_YET);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await authService.ensureValidToken();
+        const limits = await projectSettingService.limits(token);
+        if (!cancelled) setMaxFileMbCeiling(limits.max_file_mb);
+      } catch {
+        // No cap on the field rather than a message: the server refuses an
+        // oversized limit anyway, and a failure here is not the reason
+        // somebody opened this screen.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Which tab of the project's detail is open. Remembered for this browser.
   const [tab, setTab] = useState<string>(() => {
     try {
@@ -856,7 +878,7 @@ export default function Projects() {
                           compact
                           type="number"
                           min="1"
-                          max={String(MAX_FILE_MB_CEILING)}
+                          max={maxFileMbCeiling ? String(maxFileMbCeiling) : undefined}
                           value={form.max_file_mb}
                           onChange={(e) => setForm({ ...form, max_file_mb: e.target.value })}
                           placeholder={customerLimit === null ? "" : String(customerLimit)}

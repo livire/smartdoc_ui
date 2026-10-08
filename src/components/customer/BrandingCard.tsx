@@ -7,6 +7,7 @@ import CollapsiblePanel from "../common/Panel";
 import { authService } from "../../services/authService";
 import { customerService } from "../../services/customerService";
 import { modelCatalogueService, CatalogueModel } from "../../services/modelCatalogueService";
+import { projectSettingService } from "../../services/projectSettingService";
 
 // Logos are stored as data URLs in the database, so they are shrunk here
 // first. Wide rather than square: a logo is a strip, not a portrait. The two
@@ -199,6 +200,10 @@ function BrandingCard({
   // says otherwise. Kept as text while it is typed, so a half-deleted
   // number does not become 0 for a keystroke.
   const [maxFileMb, setMaxFileMb] = useState("10");
+  // The largest this installation carries, from the server. 0 until it
+  // arrives, which leaves the field uncapped for a moment — the server
+  // refuses an oversized number either way.
+  const [maxFileMbCeiling, setMaxFileMbCeiling] = useState(0);
   // Kept as text while it is being typed, so a half-deleted number does not
   // become 0 for a keystroke — the same reason the size field is text.
   const [idleMinutes, setIdleMinutes] = useState("15");
@@ -221,6 +226,25 @@ function BrandingCard({
   const [menuLogoDark, setMenuLogoDark] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // The installation's own ceiling, so the field can refuse a number before
+  // Save does. Its own effect because it does not depend on the customer.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await authService.ensureValidToken();
+        const limits = await projectSettingService.limits(token);
+        if (!cancelled) setMaxFileMbCeiling(limits.max_file_mb);
+      } catch {
+        // No cap on the field rather than a message: the server refuses an
+        // oversized limit anyway.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -522,6 +546,9 @@ function BrandingCard({
               compact
               type="number"
               min="1"
+              // The installation's own ceiling, so the field refuses an
+              // oversized number before Save has to.
+              max={maxFileMbCeiling ? String(maxFileMbCeiling) : undefined}
               value={maxFileMb}
               onChange={(e) => setMaxFileMb(e.target.value)}
               className="max-w-20 text-right"
