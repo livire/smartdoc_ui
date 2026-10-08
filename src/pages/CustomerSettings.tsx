@@ -9,6 +9,8 @@ import { useMembership } from "../context/MembershipContext";
 import { userManagementService } from "../services/userManagementService";
 import { authService } from "../services/authService";
 import { customerService } from "../services/customerService";
+import NotificationAreasCard from "../components/notifications/NotificationAreasCard";
+import Tabs from "../components/common/Tabs";
 import BrandingCard, {
   BrandingCardHandle,
   BrandingCardStatus,
@@ -21,6 +23,10 @@ import BrandingCard, {
  * Not project-specific — everything here belongs to the customer, which is
  * why it sits apart from the project settings on the Projects screen.
  */
+// The four tabs that one Save covers. The other two — Customer and
+// Notifications — save themselves.
+const SETTINGS_TABS = ["branding", "models", "password", "misc"];
+
 export default function CustomerSettings() {
   const { customer, setCustomer } = useCustomer();
   const { account } = useMembership();
@@ -40,6 +46,24 @@ export default function CustomerSettings() {
 
   // The settings card below draws no Save of its own; this screen's one
   // button reaches into it.
+  // Which tab is open. Remembered for this browser, because somebody who
+  // came here to change the logo will come back for the logo.
+  const [tab, setTab] = useState<string>(() => {
+    try {
+      return localStorage.getItem("customer_settings_tab") || "customer";
+    } catch {
+      return "customer";
+    }
+  });
+  const chooseTab = (id: string) => {
+    setTab(id);
+    try {
+      localStorage.setItem("customer_settings_tab", id);
+    } catch {
+      // A private window refuses this. Not worth telling anybody about.
+    }
+  };
+
   const settingsRef = useRef<BrandingCardHandle>(null);
   const [settingsStatus, setSettingsStatus] = useState<BrandingCardStatus>({
     saving: false,
@@ -131,10 +155,27 @@ export default function CustomerSettings() {
       <PageMeta title="Customer Settings | SmartDoc" description="How this customer's SmartDoc looks" />
 
       <div className="space-y-3 p-3">
-        {/* One Save for the whole screen, above everything it saves. The
-            settings live in the card below, which draws no button of its
-            own — this reaches into it. */}
-        <div className="flex items-center justify-end">
+        {/* The Save sits on the tab row rather than in a band of its own:
+            on its own line it read as belonging to the whole screen, when
+            it saves only the four settings tabs. */}
+        <div className="flex items-end gap-3">
+        <Tabs
+          className="flex-1"
+          tabs={[
+            { id: "customer", label: "Customer" },
+            { id: "branding", label: "Branding" },
+            { id: "models", label: "AI Models" },
+            { id: "password", label: "Password" },
+            { id: "misc", label: "Miscellaneous" },
+            { id: "notifications", label: "Notifications" },
+          ]}
+          active={tab}
+          onChange={chooseTab}
+        />
+
+        {/* The settings card draws no button of its own — this reaches into
+            it. Hidden on Customer and Notifications, which save themselves. */}
+        <div className={`pb-1.5 ${SETTINGS_TABS.includes(tab) ? "" : "hidden"}`}>
           <Button
             size="xs"
             onClick={() => settingsRef.current?.save()}
@@ -150,13 +191,19 @@ export default function CustomerSettings() {
             {settingsStatus.saving ? "Saving..." : "Save"}
           </Button>
         </div>
+        </div>
 
         {/* The customer itself — what SmartDoc set up for them. Editable by
             a system administrator; read-only for the customer's own people,
-            who cannot raise their own limit but should be able to see it. */}
+            who cannot raise their own limit but should be able to see it.
+
+            Every panel stays mounted and the inactive ones are hidden:
+            unmounting would throw away half-typed edits when somebody
+            glances at another tab. */}
+        <div className={tab === "customer" ? "" : "hidden"}>
         <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">Customer</h3>
+          {/* No heading: the tab above already says Customer. */}
+          <div className="mb-2 flex items-center justify-end gap-3">
             {!canEditRow ? (
               <span className="text-xs text-gray-500 dark:text-gray-400">Set by SmartDoc</span>
             ) : (
@@ -253,16 +300,53 @@ export default function CustomerSettings() {
           </div>
         </div>
 
-        {/* How it looks: the customer's own to decide. */}
-        {customer?.customer_id && (
-          <BrandingCard
-            ref={settingsRef}
-            customerId={customer.customer_id}
-            customerName={customer.customer_name}
-            onToast={setToast}
-            onStatusChange={onSettingsStatus}
-          />
-        )}
+        </div>
+
+        {/* Branding, AI Models, Password and Miscellaneous all live in this
+            one card because they share a single Save — it sends every field
+            together. It is told which tab is open and draws that one.
+
+            Kept mounted on the other two tabs and hidden, so a half-typed
+            password rule survives a glance at the Customer tab. */}
+        <div className={SETTINGS_TABS.includes(tab) ? "" : "hidden"}>
+          {customer?.customer_id && (
+            <BrandingCard
+              ref={settingsRef}
+              customerId={customer.customer_id}
+              customerName={customer.customer_name}
+              onToast={setToast}
+              onStatusChange={onSettingsStatus}
+              section={tab as "branding" | "models" | "password" | "misc"}
+            />
+          )}
+        </div>
+
+
+        {/* What this customer's people are told. A project can say
+            otherwise on its own screen; this is the answer everywhere
+            that has not. */}
+        <div
+          className={
+            tab === "notifications"
+              ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"
+              : "hidden"
+          }
+        >
+          {customer && (
+            <div className="space-y-5">
+              <div>
+                <p className="mb-2 text-sm font-medium text-gray-800 dark:text-white/90">Admin</p>
+                <NotificationAreasCard surface="work" />
+              </div>
+              <div>
+                <p className="mb-2 text-sm font-medium text-gray-800 dark:text-white/90">
+                  Viewer
+                </p>
+                <NotificationAreasCard surface="viewer" />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {toast && (

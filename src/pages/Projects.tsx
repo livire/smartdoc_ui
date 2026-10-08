@@ -10,13 +10,14 @@ import { CheckCircleIcon, CloseLineIcon } from "../icons";
 import { useCustomer } from "../context/CustomerContext";
 import { customerService } from "../services/customerService";
 import IdentifierPushCard from "../components/projects/IdentifierPushCard";
+import NotificationAreasCard from "../components/notifications/NotificationAreasCard";
 import {
   modelCatalogueService,
   projectReadinessService,
   CatalogueModel,
   ProjectReadiness,
 } from "../services/modelCatalogueService";
-import CollapsiblePanel from "../components/common/Panel";
+import Tabs from "../components/common/Tabs";
 import { authService } from "../services/authService";
 import { userManagementService, Project } from "../services/userManagementService";
 import { storageService } from "../services/storageService";
@@ -146,6 +147,23 @@ export default function Projects() {
   const [setting, setSetting] = useState<ProjectSetting | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  // Which tab of the project's detail is open. Remembered for this browser.
+  const [tab, setTab] = useState<string>(() => {
+    try {
+      return localStorage.getItem("project_detail_tab") || "general";
+    } catch {
+      return "general";
+    }
+  });
+  const chooseTab = (id: string) => {
+    setTab(id);
+    try {
+      localStorage.setItem("project_detail_tab", id);
+    } catch {
+      // A private window refuses this.
+    }
+  };
+
   const [form, setForm] = useState<DetailForm | null>(null);
   const [saving, setSaving] = useState(false);
   // How many projects this customer may have. Read fresh, not from the copy
@@ -665,15 +683,26 @@ export default function Projects() {
                   }`}
                   noValidate
                 >
+                  <Tabs
+                    tabs={[
+                      { id: "general", label: "Project" },
+                      { id: "models", label: "AI models" },
+                      { id: "storage", label: "Storage" },
+                      // Only once the project has a settings row: the
+                      // webhook card needs one to show anything.
+                      ...(setting ? [{ id: "webhook", label: "Webhook" }] : []),
+                      { id: "misc", label: "Miscellaneous" },
+                      { id: "notifications", label: "Notifications" },
+                    ]}
+                    active={tab}
+                    onChange={chooseTab}
+                  />
                   {/* Three panels, each one thing somebody came here to
                       change: what the project is, where its documents go,
                       and how another system talks to it. Folded state is
                       remembered, so a screen somebody uses every day opens
                       the way they left it. */}
-                  <CollapsiblePanel
-                    title="Project"
-                    storageKey="project.general"
-                  >
+                  <div className={tab === "general" ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" : "hidden"}>
                     <div className="grid gap-5 lg:grid-cols-2">
                       <div className="space-y-3">
                         <div>
@@ -717,9 +746,9 @@ export default function Projects() {
                       ))}
                       </div>
                     </div>
-                  </CollapsiblePanel>
+                  </div>
 
-                  <CollapsiblePanel title="AI models" storageKey="project.models" defaultOpen={false}>
+                  <div className={tab === "models" ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" : "hidden"}>
                     {/* Chosen from what SmartDoc offers. Empty means the
                         customer's choice applies — the same shape as the
                         size limit: blank means the customer's choice, and
@@ -764,9 +793,9 @@ export default function Projects() {
                         );
                       })}
                     </div>
-                  </CollapsiblePanel>
+                  </div>
 
-                  <CollapsiblePanel title="Storage" storageKey="project.storage" defaultOpen={false}>
+                  <div className={tab === "storage" ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" : "hidden"}>
                     {/* The two together: where documents go, and how big one
                         may be. One decision each, and both short. */}
                     <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
@@ -812,9 +841,13 @@ export default function Projects() {
                       </p>
                     </div>
 
-                    {/* How big one page may be. Unlike storage this can be
-                        changed whenever: it decides what the next upload may
-                        be and touches nothing already stored. */}
+                    </div>
+                  </div>
+
+
+                  <div className={tab === "misc" ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" : "hidden"}>
+                    {/* How big one page may be. Empty means the customer's
+                        own limit applies. */}
                     <div>
                       <Label htmlFor="max_file_mb">Max doc size</Label>
                       <div className="flex items-center gap-2">
@@ -831,8 +864,6 @@ export default function Projects() {
                         />
                         <span className="text-sm text-gray-500 dark:text-gray-400">MB</span>
                       </div>
-                      {/* Under the box, not beside it: it is a way out of an
-                          override, not part of typing the number. */}
                       {form.max_file_mb.trim() !== "" && (
                         <button
                           type="button"
@@ -843,21 +874,42 @@ export default function Projects() {
                         </button>
                       )}
                     </div>
-                    </div>
-                  </CollapsiblePanel>
+                  </div>
 
                   {setting && (
-                    <CollapsiblePanel
-                      title="Identifier push (webhook)"
-                      storageKey="project.webhook"
-                      defaultOpen={false}
-                    >
+                    <div className={tab === "webhook" ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" : "hidden"}>
                       <IdentifierPushCard
                         projectId={selectedProject.project_id}
                         onToast={(message, type) => setToast({ message, type })}
                       />
-                    </CollapsiblePanel>
+                    </div>
                   )}
+
+                  {/* What this project's people are told. Anything left
+                      alone follows the customer, so the usual case is to
+                      open this and change nothing. */}
+                  <div className={tab === "notifications" ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" : "hidden"}>
+                    <div className="space-y-5">
+                      <div>
+                        <p className="mb-2 text-sm font-medium text-gray-800 dark:text-white/90">
+                          Admin
+                        </p>
+                        <NotificationAreasCard
+                          projectId={selectedProject.project_id}
+                          surface="work"
+                        />
+                      </div>
+                      <div>
+                        <p className="mb-2 text-sm font-medium text-gray-800 dark:text-white/90">
+                          Viewer
+                        </p>
+                        <NotificationAreasCard
+                          projectId={selectedProject.project_id}
+                          surface="viewer"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </form>
               )}
               </div>

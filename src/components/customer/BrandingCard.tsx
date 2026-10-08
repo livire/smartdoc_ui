@@ -64,7 +64,6 @@ async function prepareLogo(file: File, box: readonly [number, number]): Promise<
 
 function LogoField({
   title,
-  hint,
   box,
   name,
   value,
@@ -73,7 +72,6 @@ function LogoField({
   dark = false,
 }: {
   title: string;
-  hint: string;
   box: readonly [number, number];
   name?: string | null;
   value: string | null;
@@ -88,7 +86,6 @@ function LogoField({
   return (
     <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
       <p className="text-sm font-medium text-gray-800 dark:text-white/90">{title}</p>
-      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{hint}</p>
 
       <div
         className={`mt-3 flex h-24 items-center justify-center rounded-lg p-3 ${
@@ -179,6 +176,7 @@ function BrandingCard({
   // Told whenever saving or loading changes, so the page's button can
   // refuse a press and say which of the two is happening.
   onStatusChange,
+  section = null,
 }: {
   customerId: number;
   // A hint for the placeholder only; the label itself is never pre-filled
@@ -186,6 +184,15 @@ function BrandingCard({
   customerName?: string | null;
   onToast: (toast: { message: string; type: "success" | "error" }) => void;
   onStatusChange?: (status: BrandingCardStatus) => void;
+  /**
+   * Show one section instead of all four.
+   *
+   * The page drives tabs with this. All four stay in this one component
+   * because they share a single Save — `save()` sends every field together,
+   * so splitting them into four components would mean four saves or a lot of
+   * lifted state.
+   */
+  section?: "branding" | "models" | "password" | "misc" | null;
 }, ref: React.Ref<BrandingCardHandle>) {
   const [label, setLabel] = useState("");
   // The house limit for every project this customer has, unless a project
@@ -299,10 +306,47 @@ function BrandingCard({
   // The page owns the Save button; this is how it reaches the save.
   useImperativeHandle(ref, () => ({ save, saving }));
 
+  /**
+   * One section, as a panel or as a tab's contents.
+   *
+   * A function rather than a component: a component defined inside render is
+   * a new type on every render, so React would throw away the inputs below
+   * it and take the cursor with them on every keystroke.
+   */
+  const panel = (
+    id: string,
+    title: string,
+    storageKey: string,
+    defaultOpen: boolean,
+    children: React.ReactNode,
+  ) =>
+    section ? (
+      // Hidden rather than unmounted: all four share one Save, and
+      // unmounting would throw away edits made on another tab before it was
+      // pressed.
+      //
+      // The card is drawn here rather than by the page, so every tab's
+      // contents sit in the same box — mixed bare and boxed panels made the
+      // tabs look like different screens.
+      <div
+        className={
+          section === id
+            ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"
+            : "hidden"
+        }
+      >
+        {children}
+      </div>
+    ) : (
+      <CollapsiblePanel title={title} storageKey={storageKey} defaultOpen={defaultOpen}>
+        {children}
+      </CollapsiblePanel>
+    );
+
   return (
     <div className="space-y-3">
       {/* How it looks: the name on screen and the two logos. */}
-      <CollapsiblePanel title="Branding" storageKey="customer.branding">
+      {panel("branding", "Branding", "customer.branding", true, (<>
       <div className="grid gap-x-5 gap-y-4 lg:grid-cols-2">
         <div>
           <Label htmlFor="customer-label">Customer label</Label>
@@ -314,15 +358,11 @@ function BrandingCard({
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Not set"
           />
-          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-            Shown on the sign-in page and above the menu. Left empty, neither shows a name.
-          </p>
         </div>
 
         <div className="lg:col-span-2 grid gap-4 lg:grid-cols-2">
           <LogoField
             title="Sign-in logo"
-            hint={`Shown on the sign-in page. At least ${LOGO_SIZES.login.min[0]}×${LOGO_SIZES.login.min[1]}, fitted inside ${LOGO_SIZES.login.max[0]}×${LOGO_SIZES.login.max[1]}. PNG keeps a transparent background.`}
             box={LOGO_SIZES.login.max}
             name={label || customerName}
             value={loginLogo}
@@ -331,7 +371,6 @@ function BrandingCard({
           />
           <LogoField
             title="Menu logo"
-            hint={`Shown above the menu. At least ${LOGO_SIZES.menu.min[0]}×${LOGO_SIZES.menu.min[1]}, fitted inside ${LOGO_SIZES.menu.max[0]}×${LOGO_SIZES.menu.max[1]}.`}
             box={LOGO_SIZES.menu.max}
             name={label || customerName}
             value={menuLogo}
@@ -349,7 +388,6 @@ function BrandingCard({
         <div className="lg:col-span-2 grid gap-4 lg:grid-cols-2">
           <LogoField
             title="Sign-in logo for dark screens"
-            hint="Optional. Used when somebody is reading in dark mode; without it the sign-in logo above is used."
             box={LOGO_SIZES.login.max}
             name={label || customerName}
             value={loginLogoDark}
@@ -359,7 +397,6 @@ function BrandingCard({
           />
           <LogoField
             title="Menu logo for dark screens"
-            hint="Optional. Used when somebody is reading in dark mode; without it the menu logo above is used."
             box={LOGO_SIZES.menu.max}
             name={label || customerName}
             value={menuLogoDark}
@@ -369,11 +406,11 @@ function BrandingCard({
           />
         </div>
       </div>
-      </CollapsiblePanel>
+      </>))}
 
       {/* Which model reads and which categorises, for every project here
           unless a project chooses its own. */}
-      <CollapsiblePanel title="AI Models" storageKey="customer.models" defaultOpen={false}>
+      {panel("models", "AI Models", "customer.models", false, (<>
       {/* Side by side at their own width, not one per half of the screen:
           two short dropdowns spread across a wide column read as two
           unrelated settings. */}
@@ -414,13 +451,13 @@ function BrandingCard({
           );
         })}
       </div>
-      </CollapsiblePanel>
+      </>))}
 
       {/* What a password must look like here. Checked by auth_api before
           the password reaches Keycloak — a Keycloak realm has one policy for
           everybody in it, which is why these cannot live there. Keycloak's
           own policy stays underneath as the floor. */}
-      <CollapsiblePanel title="Password" storageKey="customer.passwords" defaultOpen={false}>
+      {panel("password", "Password", "customer.passwords", false, (<>
         <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
           <div>
             <Label htmlFor="customer-pw-length">Min characters</Label>
@@ -462,15 +499,11 @@ function BrandingCard({
             </div>
           </div>
         </div>
-      </CollapsiblePanel>
+      </>))}
 
       {/* What is left: the limits that belong to the customer rather than
           to any one project. */}
-      <CollapsiblePanel
-        title="Miscellaneous"
-        storageKey="customer.misc"
-        defaultOpen={false}
-      >
+      {panel("misc", "Miscellaneous", "customer.misc", false, (<>
       {/* Side by side at their own width rather than one per half of the
           panel: two short numbers spread across a wide row read as two
           unrelated settings.
@@ -514,7 +547,7 @@ function BrandingCard({
           </div>
         </div>
       </div>
-      </CollapsiblePanel>
+      </>))}
     </div>
   );
 }

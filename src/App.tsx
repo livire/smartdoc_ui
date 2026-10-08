@@ -44,6 +44,7 @@ const MyAssignments = lazy(() => import("./pages/MyAssignments"));
 const NotRecorded = lazy(() => import("./pages/NotRecorded"));
 const UserProfiles = lazy(() => import("./pages/UserProfiles"));
 const Workspace = lazy(() => import("./pages/Workspace"));
+const Notifications = lazy(() => import("./pages/Notifications"));
 const Home = lazy(() => import("./pages/Dashboard/Home"));
 
 export default function App() {
@@ -102,6 +103,9 @@ export default function App() {
 
             {/* Workspace */}
             <Route path="/:customerUrl/workspace" element={<Workspace />} />
+
+            {/* Everything the bell has shown, kept and paged. */}
+            <Route path="/:customerUrl/notifications" element={<Notifications />} />
 
             {/* Others Page */}
             <Route path="/:customerUrl/profile" element={<UserProfiles />} />
