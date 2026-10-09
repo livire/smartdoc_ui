@@ -7,6 +7,7 @@ import Button from "../components/ui/button/Button";
 import Label from "../components/form/Label";
 import Input from "../components/form/input/InputField";
 import { PencilIcon, LockIcon, CheckCircleIcon, CloseLineIcon, CopyIcon } from "../icons";
+import Tip from "../components/ui/tooltip/Tip";
 import { useCustomer } from "../context/CustomerContext";
 import { authService } from "../services/authService";
 import { storageService } from "../services/storageService";
@@ -41,7 +42,54 @@ type FormErrors = Partial<Record<keyof typeof emptyForm, string>>;
 // Whether a storage's keys are in Vault. Checked per row, because a storage
 // row can exist before anyone has written its secret — that is the normal
 // order of things, not an error.
-type CredentialState = { status: "checking" | "ok" | "missing" | "error"; reason?: string };
+/**
+ * What the Keys column says, and in what colour.
+ *
+ * **The words come from the server.** `label` is its `summary` — "Secret key
+ * wrong", "No such bucket", "No read access" — rather than one word here
+ * covering four different causes. It said "Keys refused" for all of them,
+ * and the only way to learn which was to hover.
+ *
+ * `missing` stays amber on its own: a storage made a minute ago has no keys
+ * yet, which is the next thing to do rather than something broken.
+ */
+type CredentialState = {
+  status: "checking" | "ok" | "missing" | "failed" | "error";
+  /** The server's two or three words — shown in the icon, not the button. */
+  summary?: string;
+  reason?: string;
+  /** Where this storage's secret lives. The next thing somebody needs when
+   *  the answer is "nothing written yet". */
+  vaultPath?: string;
+};
+
+/**
+ * The button's colour.
+ *
+ * Tinted rather than filled: there is one of these on every row, and a
+ * column of solid green and red buttons reads as a wall before it reads as
+ * an answer.
+ *
+ * **Amber and red both say "Not healthy".** The words are the same on
+ * purpose — neither storage will carry a document — but a storage made a
+ * minute ago with no keys yet is somebody's next step, and one whose keys
+ * the object store refuses is somebody's problem. The colour says which; the
+ * icon says why.
+ */
+const credsStyle = (status?: CredentialState["status"]) => {
+  switch (status) {
+    case "ok":
+      return "border-success-500/40 bg-success-50 text-success-600 hover:bg-success-100 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-500";
+    case "missing":
+      return "border-warning-500/40 bg-warning-50 text-warning-600 hover:bg-warning-100 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-500";
+    case "checking":
+      return "border-gray-200 bg-gray-50 text-gray-400 dark:border-white/10 dark:bg-white/5";
+    case undefined:
+      return "border-gray-300 bg-white text-gray-600 hover:bg-gray-50 dark:border-white/15 dark:bg-white/5 dark:text-gray-300";
+    default:
+      return "border-red-500/40 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400";
+  }
+};
 
 export default function Storage({
   customerId,
@@ -115,15 +163,24 @@ export default function Storage({
       const verdict = await storageService.verifyStorage(storage.customer_storage_id, token);
       setCredentials((prev) => ({
         ...prev,
-        [storage.customer_storage_id]: verdict.ok
-          ? { status: "ok" }
-          : { status: "missing", reason: verdict.reason || undefined },
+        [storage.customer_storage_id]: {
+          // `keys_tried` is what separates "no keys yet" from "keys that do
+          // not work" — two different jobs for whoever is reading.
+          status: verdict.ok ? "ok" : verdict.keys_tried ? "failed" : "missing",
+          summary: verdict.summary || undefined,
+          reason: verdict.reason || undefined,
+          vaultPath: verdict.vault_path || undefined,
+        },
       }));
     } catch (err) {
       setCredentials((prev) => ({
         ...prev,
         [storage.customer_storage_id]: {
+          // The request itself failed — smartdoc_api unreachable, or the
+          // token gone. Nothing was learned about the storage, so say that
+          // rather than naming a cause.
           status: "error",
+          summary: "The check could not be made",
           reason: err instanceof Error ? err.message : "Check failed",
         },
       }));
@@ -465,23 +522,64 @@ export default function Storage({
                       {s.s3_region}
                     </TableCell>
                     <TableCell className="px-4 py-2.5 text-sm">
-                      {/* Whether the secret exists in Vault. Click to re-check. */}
-                      <button
-                        type="button"
-                        onClick={() => checkCredentials(s)}
-                        title={creds?.reason || "Check again"}
-                        className="text-xs underline-offset-2 hover:underline"
-                      >
-                        {!creds || creds.status === "checking" ? (
-                          <span className="text-gray-400">Checking...</span>
-                        ) : creds.status === "ok" ? (
-                          <span className="text-success-500">Stored</span>
-                        ) : creds.status === "missing" ? (
-                          <span className="text-warning-500">Not set</span>
-                        ) : (
-                          <span className="text-red-500">Check failed</span>
+                      {/* Whether the keys work, not merely whether a secret
+                          was written — see `known-issues.md`, the August
+                          rotation that left this green while every upload
+                          failed.
+
+                          A button rather than the underlined text it was:
+                          pressing it signs a real request to the object
+                          store, and that reads as a thing you do, not a
+                          link to somewhere. It carries the answer as its
+                          own label and colour, so the row says what is
+                          wrong without being asked. */}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => checkCredentials(s)}
+                          disabled={!creds || creds.status === "checking"}
+                          title="Check these keys against the bucket"
+                          className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-default ${credsStyle(creds?.status)}`}
+                        >
+                          {creds?.status === "checking" || !creds ? null : (
+                            // A dot, not an icon: at this size a tick and a
+                            // cross are the same smudge, and the colour is
+                            // already doing the work.
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                          )}
+                          {!creds || creds.status === "checking"
+                            ? "Checking..."
+                            : creds.status === "ok"
+                              ? "Healthy"
+                              : "Not healthy"}
+                        </button>
+
+                        {/* Everything the check learned. The button says
+                            healthy or not and nothing else — a cause in a
+                            table cell has to be cut to fit, and a cut
+                            sentence is worse than none. */}
+                        {creds && creds.status !== "checking" && (
+                          <Tip
+                            text={
+                              <span className="block space-y-1">
+                                {creds.summary && <span className="block font-medium">{creds.summary}</span>}
+                                {creds.reason && <span className="block">{creds.reason}</span>}
+                                {creds.vaultPath && (
+                                  <span className="block text-gray-300">Keys read from {creds.vaultPath}</span>
+                                )}
+                              </span>
+                            }
+                          >
+                            <span
+                              role="img"
+                              aria-label={[creds.summary, creds.reason].filter(Boolean).join(" — ")}
+                              className="flex size-4 items-center justify-center rounded-full border border-current text-[10px] font-semibold leading-none text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                            >
+                              i
+                            </span>
+                          </Tip>
                         )}
-                      </button>
+                      </div>
                     </TableCell>
                     <TableCell className="px-4 py-2.5 text-sm">
                       <div className="flex items-center gap-1">

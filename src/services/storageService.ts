@@ -34,8 +34,25 @@ export interface Storage {
 }
 
 export interface StorageVerdict {
+  /** The keys work — the bucket answered with them. */
   ok: boolean;
+  /**
+   * Two or three words for the column: "Working", "Secret key wrong",
+   * "No such bucket". The server words it, not the screen, so there is one
+   * wording rather than two drifting apart.
+   */
+  summary: string | null;
+  /** The sentence behind the summary, shown on hover. */
   reason: string | null;
+  /**
+   * Whether the keys were actually tried against the bucket.
+   *
+   * False means the answer is only about Vault: no secret was written, so
+   * there was nothing to try. True and `ok: false` is the state worth
+   * noticing — a secret is there and the object store refuses it, which is
+   * what a rotation that missed Vault looks like.
+   */
+  keys_tried: boolean;
   vault_path: string;
 }
 
@@ -101,7 +118,8 @@ export const storageService = {
     return body.data?.data;
   },
 
-  // Has this storage's secret been written yet? Never returns key values.
+  // Is this storage usable? Two questions: is a secret written, and do the
+  // keys work on the bucket. Never returns key values.
   async verifyStorage(customerStorageId: number, accessToken: string): Promise<StorageVerdict> {
     const response = await fetch(`${API_URL}/customer_storage/verify`, {
       method: "POST",

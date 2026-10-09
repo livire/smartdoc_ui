@@ -3,7 +3,7 @@ import AuthLayout from "../AuthPages/AuthPageLayout";
 import Button from "../../components/ui/button/Button";
 import { useAuth } from "../../context/AuthContext";
 import { useMembership } from "../../context/MembershipContext";
-import { GroupIcon, BoxCubeIcon } from "../../icons";
+import { GroupIcon, BoxCubeIcon, LockIcon } from "../../icons";
 
 /**
  * The frame every system screen sits in: header with the product's mark and
@@ -18,6 +18,7 @@ import { GroupIcon, BoxCubeIcon } from "../../icons";
 const SYSTEM_MENU = [
   { name: "Customers", path: "/sys/customers", icon: <GroupIcon /> },
   { name: "AI Models", path: "/sys/models", icon: <BoxCubeIcon /> },
+  { name: "Sign-in", path: "/sys/sign-in", icon: <LockIcon /> },
 ];
 
 export default function SystemLayout() {

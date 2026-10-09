@@ -1,4 +1,5 @@
 import { UserProject } from "./authService";
+import { cached, forget, FOREVER } from "./cache";
 
 const API_URL = import.meta.env.VITE_API_URL;
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL;
@@ -70,33 +71,69 @@ const extractMessage = async (response: Response, fallback: string) => {
   }
 };
 
+/**
+ * Four reads every setup screen repeats, held for this tab.
+ *
+ * Ten screens call `getProjectsByCustomer`, and each one fetched it again:
+ * the Users screen alone cost `/user/customer/:id`, `/project/customer/:id`,
+ * `/user_project/customer/:id` and the whole of Keycloak, then paid for all
+ * four again on the way back from User Access. 208 requests and 1.2 MB for a
+ * few screens, mostly the same lists twice.
+ *
+ * `FOREVER` means until sign-out or until something here writes. These are
+ * setup lists — the people, the projects, who is on what. They change when
+ * somebody on this screen changes them, which is exactly when a write below
+ * forgets them.
+ *
+ * **Every write clears what it touched**, in the service and never in the
+ * screen that called it, so a new caller cannot forget to. The one that is
+ * easy to miss is Keycloak's copy: creating a person and enabling or
+ * disabling one both change it, and neither looks like it would.
+ */
+const KEY = {
+  users: (customerId: number) => `users:${customerId}`,
+  projects: (customerId: number) => `projects:${customerId}`,
+  memberships: (customerId: number) => `memberships:${customerId}`,
+  keycloak: "keycloak-users",
+};
+
+/** What changed about people: the app's rows and Keycloak's copy of them. */
+const forgetPeople = () => {
+  forget("users");
+  forget(KEY.keycloak);
+};
+
 export const userManagementService = {
   async getUsersByCustomer(customerId: number, accessToken: string): Promise<AppUser[]> {
-    const response = await fetch(`${API_URL}/user/customer/${customerId}`, {
-      method: "GET",
-      headers: jsonHeaders(accessToken),
+    return cached(KEY.users(customerId), FOREVER, async () => {
+      const response = await fetch(`${API_URL}/user/customer/${customerId}`, {
+        method: "GET",
+        headers: jsonHeaders(accessToken),
+      });
+
+      if (!response.ok) {
+        throw new Error(await extractMessage(response, "Failed to fetch users"));
+      }
+
+      const body = await response.json();
+      return (body.data || []) as AppUser[];
     });
-
-    if (!response.ok) {
-      throw new Error(await extractMessage(response, "Failed to fetch users"));
-    }
-
-    const body = await response.json();
-    return body.data || [];
   },
 
   async getProjectsByCustomer(customerId: number, accessToken: string): Promise<Project[]> {
-    const response = await fetch(`${API_URL}/project/customer/${customerId}`, {
-      method: "GET",
-      headers: jsonHeaders(accessToken),
+    return cached(KEY.projects(customerId), FOREVER, async () => {
+      const response = await fetch(`${API_URL}/project/customer/${customerId}`, {
+        method: "GET",
+        headers: jsonHeaders(accessToken),
+      });
+
+      if (!response.ok) {
+        throw new Error(await extractMessage(response, "Failed to fetch projects"));
+      }
+
+      const body = await response.json();
+      return (body.data || []) as Project[];
     });
-
-    if (!response.ok) {
-      throw new Error(await extractMessage(response, "Failed to fetch projects"));
-    }
-
-    const body = await response.json();
-    return body.data || [];
   },
 
   /**
@@ -135,33 +172,47 @@ export const userManagementService = {
   // that as "names unavailable" rather than a failure, since usernames and
   // project assignments still work without it.
   async getKeycloakUsers(accessToken: string, max = 500): Promise<KeycloakUser[]> {
-    const response = await fetch(`${AUTH_API_URL}/all_users?max=${max}`, {
-      method: "POST",
-      headers: jsonHeaders(accessToken),
+    // The heaviest of the four — every account in the realm, up to 500 — and
+    // the one that was fetched most often. Held per tab; the writes that
+    // change it (creating a person, enabling or disabling one) clear it.
+    return cached(KEY.keycloak, FOREVER, async () => {
+      const response = await fetch(`${AUTH_API_URL}/all_users?max=${max}`, {
+        method: "POST",
+        headers: jsonHeaders(accessToken),
+      });
+
+      if (!response.ok) {
+        throw new Error(await extractMessage(response, "Failed to fetch user details"));
+      }
+
+      const body = await response.json();
+      return (body.data?.users || []) as KeycloakUser[];
     });
-
-    if (!response.ok) {
-      throw new Error(await extractMessage(response, "Failed to fetch user details"));
-    }
-
-    const body = await response.json();
-    return body.data?.users || [];
   },
 
-  // All user_project rows, system-wide — used to derive per-user project
-  // counts/lists client-side in one call instead of one call per user.
-  async getAllUserProjects(accessToken: string): Promise<UserProject[]> {
-    const response = await fetch(`${API_URL}/user_project/`, {
-      method: "GET",
-      headers: jsonHeaders(accessToken),
+  /**
+   * Every membership inside one customer.
+   *
+   * There is deliberately no "all memberships" call here. This asked
+   * `GET /user_project/` — every row in the system — and the screen kept the
+   * ones whose user it recognised, which meant one company's memberships
+   * arrived in another company's browser and sat in the network tab. The
+   * server now does the narrowing and refuses a customer that is not yours.
+   */
+  async getUserProjectsByCustomer(customerId: number, accessToken: string): Promise<UserProject[]> {
+    return cached(KEY.memberships(customerId), FOREVER, async () => {
+      const response = await fetch(`${API_URL}/user_project/customer/${customerId}`, {
+        method: "GET",
+        headers: jsonHeaders(accessToken),
+      });
+
+      if (!response.ok) {
+        throw new Error(await extractMessage(response, "Failed to fetch user projects"));
+      }
+
+      const body = await response.json();
+      return (body.data || []) as UserProject[];
     });
-
-    if (!response.ok) {
-      throw new Error(await extractMessage(response, "Failed to fetch user projects"));
-    }
-
-    const body = await response.json();
-    return body.data || [];
   },
 
   // roleId is the capacity the user gets on THIS project: 1 = admin,
@@ -182,6 +233,8 @@ export const userManagementService = {
     if (!response.ok) {
       throw new Error(await extractMessage(response, "Failed to assign project"));
     }
+
+    forget("memberships");
 
     const body = await response.json();
     return body.data;
@@ -228,6 +281,8 @@ export const userManagementService = {
       throw new Error(await extractMessage(response, "Failed to change role"));
     }
 
+    forget("memberships");
+
     const body = await response.json();
     return body.data?.data;
   },
@@ -241,74 +296,53 @@ export const userManagementService = {
     if (!response.ok) {
       throw new Error(await extractMessage(response, "Failed to remove project assignment"));
     }
+
+    forget("memberships");
   },
 
-  // Step 1 of user creation: create the identity in Keycloak via auth_api.
-  // Uses the calling admin's own token — /add_user has no privileged
-  // service-account path, so the caller must carry manage-users/realm-admin.
-  async createKeycloakUser(input: NewUserInput, accessToken: string): Promise<KeycloakUser> {
-    const response = await fetch(`${AUTH_API_URL}/add_user`, {
+  /**
+   * Create a person: the Keycloak account and the SmartDoc row, in one call.
+   *
+   * **Who may is decided by `smartdoc_api`**, on SmartDoc's own roles. It
+   * used to be two calls, the first straight to `auth_api` with the admin's
+   * own token — so Keycloak judged the person, and a customer administrator
+   * without `manage-users` was refused. Two different ideas of
+   * "administrator", and only one of them is on this screen.
+   *
+   * One call also closes the gap where the second failed and left a Keycloak
+   * account with nothing pointing at it.
+   */
+  async provisionUser(
+    input: { username: string; email: string; firstName: string; lastName: string; customerId: number },
+    accessToken: string,
+  ): Promise<{ user_id: number; username: string; verification?: "sent" | "failed" }> {
+    const response = await fetch(`${API_URL}/user/provision`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         username: input.username,
         email: input.email,
         firstName: input.firstName,
         lastName: input.lastName,
-        // No password: the invitation email carries a link that sets one.
-        // An administrator typing a password here has to then read it out
-        // or send it in a message, which is what this replaces. The lock
-        // button on the Users screen is still there for a reset.
-        ...(input.password ? { password: input.password } : {}),
-        enabled: true,
-        emailVerified: false,
-        // Email the new account a link to verify its address. This also
-        // records VERIFY_EMAIL against the user, so they cannot sign in
-        // until they follow it — which is why the dialog says so. A failed
-        // send does not fail the creation; the answer carries
-        // `verification: "failed"` and the screen reports it.
-        send_verification: true,
+        customer_id: input.customerId,
       }),
     });
 
     if (!response.ok) {
-      throw new Error(await extractMessage(response, "Failed to create user in Keycloak"));
+      throw new Error(await extractMessage(response, "Failed to create the user"));
     }
+
+    // Both halves: this made a `user` row and a Keycloak account, and the
+    // screen reads the name and email from the second.
+    forgetPeople();
 
     const body = await response.json();
     return body.data;
   },
 
-  // Step 2 of user creation: create the matching row in smartdoc_api's DB.
-  // `username` is the plain supplied username; `keycloakId` is the Keycloak
-  // `sub`/user id returned by createKeycloakUser, stored in the dedicated
-  // `keycloak_id` column.
-  async createDbUser(
-    username: string,
-    keycloakId: string,
-    customerId: number,
-    accessToken: string
-  ): Promise<AppUser> {
-    const response = await fetch(`${API_URL}/user/`, {
-      method: "POST",
-      headers: jsonHeaders(accessToken),
-      body: JSON.stringify({ username, keycloak_id: keycloakId, customer_id: customerId }),
-    });
-
-    if (!response.ok) {
-      throw new Error(await extractMessage(response, "Failed to create user record"));
-    }
-
-    const body = await response.json();
-    return body.data;
-  },
-
-  // Sync the enable/disable state to Keycloak. Uses the calling admin's own
-  // token — /user_status has no privileged service-account path, same as
-  // /add_user, so the caller must carry manage-users/realm-admin.
   async setKeycloakUserStatus(
     keycloakUserId: string,
     enabled: boolean,
@@ -326,6 +360,11 @@ export const userManagementService = {
     if (!response.ok) {
       throw new Error(await extractMessage(response, "Failed to update Keycloak user status"));
     }
+
+    // Enabled/disabled is a Keycloak field, so it is Keycloak's copy that
+    // went stale — the one write here that does not look like it touches a
+    // list at all.
+    forget(KEY.keycloak);
   },
 
   async createProject(
@@ -347,6 +386,8 @@ export const userManagementService = {
     if (!response.ok) {
       throw new Error(await extractMessage(response, "Failed to create project"));
     }
+
+    forget("projects");
 
     const body = await response.json();
     return body.data;
@@ -378,6 +419,8 @@ export const userManagementService = {
     if (!response.ok) {
       throw new Error(await extractMessage(response, "Failed to update project"));
     }
+
+    forget("projects");
 
     const body = await response.json();
     return body.data?.data;
@@ -411,6 +454,8 @@ export const userManagementService = {
     if (!response.ok) {
       throw new Error(await extractMessage(response, "Failed to update user"));
     }
+
+    forget("users");
 
     const body = await response.json();
     return body.data?.data;

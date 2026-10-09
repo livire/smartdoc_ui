@@ -1,9 +1,12 @@
 import { Link, useLocation } from "react-router";
 import { useCustomer } from "../../context/CustomerContext";
 
+// Only the screens this app actually has. It also named a Workspace page
+// and eight template demos — Alerts, Avatars, Badges, Buttons and the rest —
+// all of which were deleted with their routes. `humanize` below covers
+// anything missing from here, so a stale name is worse than no entry.
 const pageTitles: Record<string, string> = {
   "": "Dashboard",
-  workspace: "Workspace",
   profile: "Profile",
   notifications: "Notifications",
   digitize: "Digitize",
@@ -11,14 +14,6 @@ const pageTitles: Record<string, string> = {
   assignments: "My Assignments",
   "new-assignment": "New Assignment",
   users: "Users",
-  alerts: "Alerts",
-  avatars: "Avatars",
-  badge: "Badges",
-  buttons: "Buttons",
-  images: "Images",
-  videos: "Videos",
-  "line-chart": "Line Chart",
-  "bar-chart": "Bar Chart",
 };
 
 const humanize = (slug: string) =>

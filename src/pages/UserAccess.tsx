@@ -116,7 +116,7 @@ export default function UserAccess() {
         const [users, projects, memberships] = await Promise.all([
           userManagementService.getUsersByCustomer(customer.customer_id, token),
           userManagementService.getProjectsByCustomer(customer.customer_id, token),
-          userManagementService.getAllUserProjects(token),
+          userManagementService.getUserProjectsByCustomer(customer.customer_id, token),
         ]);
 
         setPerson(users.find((u) => String(u.user_id) === String(userId)) ?? null);
@@ -220,7 +220,9 @@ export default function UserAccess() {
   };
 
   const save = async () => {
-    if (changed.length === 0 || !userId) return;
+    // The customer as well as the person: reading the memberships back is
+    // a customer-scoped call, and there is no unscoped one to fall back to.
+    if (changed.length === 0 || !userId || !customer) return;
 
     setSaving(true);
     try {
@@ -281,7 +283,7 @@ export default function UserAccess() {
 
       // Read back rather than patching what is on screen: assigning makes
       // ids this screen does not have, and the next save needs them.
-      const memberships = await userManagementService.getAllUserProjects(token);
+      const memberships = await userManagementService.getUserProjectsByCustomer(customer.customer_id, token);
       const mine = new Map<string, UserProject>();
       for (const row of memberships) {
         if (String(row.user_id) === String(userId)) mine.set(String(row.project_id), row);

@@ -115,11 +115,29 @@ and email columns rather than failing to load.
 Rows are matched on `keycloak_id`, falling back to username for legacy rows
 created before that column existed.
 
+**Memberships are read per customer** — `GET /user_project/customer/:id`
+(2026-10-09). There is no "all memberships" call to go back to: this screen
+used to ask for every row in the system and keep the ones it recognised, so
+one company's memberships arrived in another company's browser. The route is
+gone as well as the UI service function. `UserAccess.tsx` reads the same
+way.
+
 **A new account is not given a password (2026-10-06).** The Add New User
-dialog asks for username and email; `auth_api` creates the account with no
-credentials and emails one link that both verifies the address and sets a
+dialog asks for username, email and name; the account is created with no
+credentials and emailed one link that both verifies the address and sets a
 password. Email is required for that reason. The "Not verified" mark beside
 an address is a button that sends the link again.
+
+**Creating one is a single call to `smartdoc_api`** — `POST /user/provision`
+(2026-10-08), which makes the Keycloak account and the `user` row together.
+It was two calls, the first straight to `auth_api` with the admin's own
+token, which meant **Keycloak** judged whether they could create a user: a
+customer administrator without `manage-users` in Keycloak was refused, and
+those are two different ideas of "administrator". `smartdoc_api` now decides
+on SmartDoc's roles and calls `auth_api` with its own service token;
+`auth_api` refuses `/add_user` from anything but one. The two-call path was
+deleted rather than left, because its other fault was leaving a Keycloak
+account with no row behind it whenever the second call failed.
 
 **Passwords are set here too** — the lock button beside each
 row, which opens with a generated password ready to copy rather than an
@@ -168,6 +186,32 @@ role is in one place.
 
 Unticking a project clears its row — a role and three privileges left under
 an unticked project read as settings that still apply, and they do not.
+
+## Caching the setup lists
+`services/cache.ts` — a `Map` in memory, no library and not localStorage, so
+it dies with the tab and can never serve yesterday's answer or the previous
+person's. It stores the **promise**, not the value, so two screens asking in
+the same moment make one request between them.
+
+Four reads go through it, all until sign-out: the customer's users, its
+projects, its memberships, and Keycloak's copy of the accounts
+(`all_users?max=500`, the heavy one). Ten screens call
+`getProjectsByCustomer` and each used to fetch it again — the Users screen
+alone cost four lists, then all four again on the way back from User Access.
+
+**Every write clears what it touched, in the service and never in the screen
+that called it**, so a new caller cannot forget to. The one that is easy to
+miss: enabling or disabling somebody writes a **Keycloak** field, so it is
+Keycloak's copy that goes stale, and nothing about that call looks like it
+touches a list.
+
+**`authService.logout()` calls `forgetAll()`.** The cache belongs to the tab,
+not to the account — without that line the next person to sign in at this
+browser is handed the previous one's users and projects.
+
+Not cached: the notification count and conditions. The bell re-counts on
+every screen change and every two minutes, and being out of date is the thing
+it exists to fix.
 
 ## Two endpoints with caps, and why both broke
 `smartdoc_upload_api` refuses more than **100 files** to

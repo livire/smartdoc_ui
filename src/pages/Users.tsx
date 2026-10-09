@@ -228,7 +228,7 @@ export default function Users({
       const [usersResult, projectsResult, userProjectsResult] = await Promise.all([
         userManagementService.getUsersByCustomer(customer.customer_id, token),
         userManagementService.getProjectsByCustomer(customer.customer_id, token),
-        userManagementService.getAllUserProjects(token),
+        userManagementService.getUserProjectsByCustomer(customer.customer_id, token),
       ]);
       setUsers(usersResult);
       setProjects(projectsResult);
@@ -412,38 +412,26 @@ export default function Users({
 
     const token = await authService.ensureValidToken();
 
-    // Step 1: create the identity in Keycloak (via auth_api), using the
-    // calling admin's own token — /add_user requires the caller to carry
-    // manage-users/realm-admin, there's no privileged service-account path.
-    let keycloakUser;
+    // One call: smartdoc_api creates the Keycloak account and the user row
+    // together, and decides who may on SmartDoc's own roles. It used to be
+    // two calls — the first straight to auth_api with this admin's token —
+    // which meant Keycloak judged the person, and left an orphaned Keycloak
+    // account behind whenever the second failed.
+    let created;
     try {
-      keycloakUser = await userManagementService.createKeycloakUser(newUser, token);
-    } catch (err) {
-      setToast({
-        message: `Failed to create user in Keycloak: ${err instanceof Error ? err.message : "Unknown error"}`,
-        type: "error",
-      });
-      setCreatingUser(false);
-      return;
-    }
-
-    // Step 2: create the matching record in smartdoc_api's DB — username as
-    // supplied, plus the Keycloak sub in the dedicated keycloak_id column.
-    // If this fails, the Keycloak account already exists (auth_api has no
-    // delete endpoint to roll it back) — surface that clearly rather than
-    // leaving it silent.
-    try {
-      await userManagementService.createDbUser(
-        keycloakUser.username,
-        keycloakUser.id,
-        customer.customer_id,
-        token
+      created = await userManagementService.provisionUser(
+        {
+          username: newUser.username.trim(),
+          email: newUser.email.trim(),
+          firstName: newUser.firstName.trim(),
+          lastName: newUser.lastName.trim(),
+          customerId: customer.customer_id,
+        },
+        token,
       );
     } catch (err) {
       setToast({
-        message: `User "${keycloakUser.username}" was created in Keycloak but the database record failed (${
-          err instanceof Error ? err.message : "unknown error"
-        }). This user cannot log in yet — contact an administrator before retrying.`,
+        message: err instanceof Error ? err.message : "Failed to create the user",
         type: "error",
       });
       setCreatingUser(false);
@@ -454,20 +442,20 @@ export default function Users({
     // an administrator thinking the person has a link when they do not, and
     // that person cannot sign in until they follow one.
     setToast(
-      keycloakUser.verification === "failed"
+      created.verification === "failed"
         ? {
-            message: `User "${keycloakUser.username}" was created, but the verification email could not be sent. Use the envelope beside their name to try again.`,
+            message: `User "${created.username}" was created, but the verification email could not be sent. Use the "Not verified" mark beside their name to try again.`,
             type: "error",
           }
         : {
-            message: `User "${keycloakUser.username}" created. A link to verify their email is on its way.`,
+            message: `User "${created.username}" created. A link to verify their email is on its way.`,
             type: "success",
           }
     );
     setIsAddUserOpen(false);
     setNewUser(emptyNewUser);
     setCreatingUser(false);
-    loadAll(keycloakUser.username);
+    loadAll(created.username);
   };
 
   const handleEditUser = async (e: React.FormEvent) => {

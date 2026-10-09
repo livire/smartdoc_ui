@@ -1,4 +1,5 @@
 import { requireReauth } from "./sessionExpiry";
+import { forgetAll } from "./cache";
 
 const API_BASE_URL = import.meta.env.VITE_AUTH_API_URL;
 const API_URL = import.meta.env.VITE_API_URL;
@@ -374,6 +375,11 @@ export const authService = {
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("user");
     localStorage.removeItem("token_expiry");
+    // The cached lists die with it. They are held for the tab, not for the
+    // account, so without this the next person to sign in at this browser
+    // would be handed the previous one's users and projects. Same line as
+    // the viewer's `logout()`, for the same reason.
+    forgetAll();
   },
 
   isTokenExpired(): boolean {

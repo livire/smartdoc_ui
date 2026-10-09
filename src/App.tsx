@@ -27,6 +27,7 @@ import SessionExpiredPrompt from "./components/auth/SessionExpiredPrompt";
 const ProjectSelection = lazy(() => import("./pages/AuthPages/ProjectSelection"));
 const SystemCustomers = lazy(() => import("./pages/System/SystemCustomers"));
 const SystemModels = lazy(() => import("./pages/System/SystemModels"));
+const SystemSignInSettings = lazy(() => import("./pages/System/SystemSignInSettings"));
 const SignUp = lazy(() => import("./pages/AuthPages/SignUp"));
 const Digitize = lazy(() => import("./pages/Digitize"));
 const Users = lazy(() => import("./pages/Users"));
@@ -43,7 +44,6 @@ const VerifyBatch = lazy(() => import("./pages/VerifyBatch"));
 const MyAssignments = lazy(() => import("./pages/MyAssignments"));
 const NotRecorded = lazy(() => import("./pages/NotRecorded"));
 const UserProfiles = lazy(() => import("./pages/UserProfiles"));
-const Workspace = lazy(() => import("./pages/Workspace"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const Home = lazy(() => import("./pages/Dashboard/Home"));
 
@@ -87,6 +87,8 @@ export default function App() {
           <Route element={<SystemLayout />}>
             <Route path="/sys/customers" element={<SystemCustomers />} />
             <Route path="/sys/models" element={<SystemModels />} />
+            {/* How people sign in — realm flags, the same for every customer. */}
+            <Route path="/sys/sign-in" element={<SystemSignInSettings />} />
           </Route>
           {/* Dashboard Layout (protected) */}
           <Route
@@ -100,9 +102,6 @@ export default function App() {
             {/* Inside the shell, not in front of it: the menu and the user
                 menu are there while a project is still to be chosen. */}
             <Route path="/:customerUrl/select-project" element={<ProjectSelection />} />
-
-            {/* Workspace */}
-            <Route path="/:customerUrl/workspace" element={<Workspace />} />
 
             {/* Everything the bell has shown, kept and paged. */}
             <Route path="/:customerUrl/notifications" element={<Notifications />} />
