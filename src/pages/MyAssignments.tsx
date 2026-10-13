@@ -19,6 +19,7 @@ import {
   ASSIGNMENT_STATUS_LABELS,
   ASSIGNMENT_STATUS_COLORS,
 } from "../services/assignmentStageService";
+import { useShortName } from "../hooks/useShortName";
 import { assignmentLabel } from "../services/assignmentService";
 
 // Labels and colours live in assignmentStageService so this screen, the
@@ -163,6 +164,8 @@ function FilterDropdown({
 }
 
 export default function MyAssignments() {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { project } = useProject();
@@ -388,7 +391,7 @@ export default function MyAssignments() {
                   <TableCell className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300">
                     {/* Only meaningful on a verification — a capture stage is
                         the reader's own work. */}
-                    {a.captured_by_username || "—"}
+                    {short(a.captured_by_username) || "—"}
                   </TableCell>
                   <TableCell className="px-4 py-4 text-sm">
                     <div className="flex items-center gap-2">

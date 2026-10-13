@@ -7,6 +7,7 @@ import {
   sessionRestored,
 } from "../../services/sessionExpiry";
 import Toast from "../common/Toast";
+import { useShortName } from "../../hooks/useShortName";
 
 /**
  * Asks for the password over whatever screen the person was on.
@@ -15,6 +16,8 @@ import Toast from "../common/Toast";
  * part-filled form or a chosen document is all still there afterwards.
  */
 export default function SessionExpiredPrompt() {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const [locked, setLocked] = useState(isSessionLocked);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +95,7 @@ export default function SessionExpiredPrompt() {
           </label>
           <input
             type="text"
-            value={username}
+            value={short(username)}
             readOnly
             className="h-11 w-full cursor-default rounded-lg border border-gray-200 bg-gray-50 px-4 text-sm text-gray-600 focus:outline-hidden dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300"
           />

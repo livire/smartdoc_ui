@@ -11,7 +11,9 @@ import BrandingCard, {
   BrandingCardHandle,
   BrandingCardStatus,
 } from "../../components/customer/BrandingCard";
-import CollapsiblePanel from "../../components/common/Panel";
+import CustomerModels, { CustomerModelsHandle } from "./CustomerModels";
+import CustomerOwnSmtp from "../../components/customer/CustomerOwnSmtp";
+import { smtpService, SmtpAccount, isSmartDocAccount } from "../../services/smtpService";
 
 /**
  * One customer, as the people who run SmartDoc see it: its own row, where
@@ -35,6 +37,17 @@ export default function CustomerPane({
   const [url, setUrl] = useState(customer.customer_url);
   const [allowed, setAllowed] = useState(String(customer.allowed_projects));
   const [active, setActive] = useState(customer.is_active === 1);
+  // Whether this customer may add AI models of their own. SmartDoc's
+  // decision, beside the project limit, not something they set.
+  const [canAddModels, setCanAddModels] = useState(customer.can_add_models === 1);
+  const [canAddSmtp, setCanAddSmtp] = useState(customer.can_add_smtp === 1);
+  // Which of SmartDoc's email accounts sends this customer's mail. "" is
+  // the default one, which is every customer until somebody chooses.
+  const [smtpId, setSmtpId] = useState(customer.smtp_id ? String(customer.smtp_id) : "");
+  // SmartDoc's own accounts, to choose from. Theirs is not in this list:
+  // when they have one it is used ahead of any of these, and offering it
+  // here would read as a choice that can be unmade.
+  const [smtpOptions, setSmtpOptions] = useState<SmtpAccount[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +55,8 @@ export default function CustomerPane({
 
   // The settings card draws no Save; this pane puts one above it.
   const settingsRef = useRef<BrandingCardHandle>(null);
+  // The allowlist saves with everything else: one Save for the pane.
+  const modelsRef = useRef<CustomerModelsHandle>(null);
   const [settingsStatus, setSettingsStatus] = useState<BrandingCardStatus>({
     saving: false,
     loading: true,
@@ -56,19 +71,77 @@ export default function CustomerPane({
   const [refreshKey, setRefreshKey] = useState(0);
   // Two tabs, because they answer different questions: what this customer
   // is, and who is in it. The second is a long list and deserves the height.
-  const [tab, setTab] = useState<"customer" | "storage" | "users">("customer");
+  /**
+   * Which panel is open.
+   *
+   * **One tab per panel**, the same shape as the customer's own screens.
+   * They were collapsible panels stacked down one tab, which meant
+   * scrolling past four of them to reach the fifth and no way to link
+   * somebody to one.
+   *
+   * `branding`, `models`, `password` and `misc` are `BrandingCard`'s own
+   * sections: it is mounted once and told which to show, so all four share
+   * the one Save and an edit on another tab is not thrown away.
+   */
+  const [tab, setTab] = useState<
+    "customer" | "branding" | "models" | "email" | "password" | "misc" | "storage" | "users"
+  >("customer");
+
+  // The tabs whose contents BrandingCard draws.
+  // `models` is not here: SmartDoc's AI models tab is the allowlist and
+  // the toggle, both drawn below. The card's own models section lost its
+  // contents when the customer-wide defaults went, and an empty panel is
+  // worse than none.
+  const CARD_TABS = ["branding", "password", "misc"];
+
+  // The tabs the one Save writes: the customer row, the settings card's
+  // three, and the allowlist. Storage and Users save themselves, so a Save
+  // over them would be a button that does nothing to what is on screen.
+  const SAVE_TABS = ["customer", "branding", "models", "email", "password", "misc"];
+
+  // SmartDoc's own email accounts, to choose a sender from. Read once —
+  // this list changes on /sys → Email, not here.
+  useEffect(() => {
+    let cancelled = false;
+    smtpService
+      .list()
+      .then((all) => {
+        if (!cancelled) setSmtpOptions(all.filter(isSmartDocAccount));
+      })
+      .catch(() => {
+        // The dropdown then offers only "SmartDoc's default", which is what
+        // every customer has anyway. Not worth a message over the whole pane.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Another customer picked in the list: the form follows, rather than
   // keeping the last one's half-typed name.
+  /**
+   * Start again when a **different** customer is opened.
+   *
+   * **Keyed on the id, not the object.** Saving reloads the customer list,
+   * which makes a new object for the same customer — on `[customer]` that
+   * ran this, and somebody who pressed Save on the AI models tab was put
+   * back on Customer with no idea why.
+   */
   useEffect(() => {
     setName(customer.customer_name);
     setUrl(customer.customer_url);
     setAllowed(String(customer.allowed_projects));
+    setCanAddModels(customer.can_add_models === 1);
+    setCanAddSmtp(customer.can_add_smtp === 1);
+    setSmtpId(customer.smtp_id ? String(customer.smtp_id) : "");
     setActive(customer.is_active === 1);
     setSaved(null);
     setError(null);
     setTab("customer");
-  }, [customer]);
+    // Only the id: the rest is read once here and owned by this screen
+    // until another customer is chosen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer.customer_id]);
 
   /**
    * Save the customer's own row.
@@ -82,7 +155,15 @@ export default function CustomerPane({
     // limit below what they have — nothing else should have been written
     // either, and its message is the one worth reading.
     const ok = await save();
-    if (ok) await settingsRef.current?.save();
+    if (!ok) return;
+
+    await settingsRef.current?.save();
+    // The allowlist is its own record, written after the rest for the same
+    // reason: if the row was refused, nothing else should have changed.
+    await modelsRef.current?.save();
+
+    // Said once, at the end, for all three.
+    setSaved("Saved");
   };
 
   const save = async () => {
@@ -99,12 +180,14 @@ export default function CustomerPane({
           customer_name: name.trim(),
           customer_url: cleanUrl,
           allowed_projects: Number(allowed),
+          can_add_models: (canAddModels ? 1 : 0) as 0 | 1,
+          can_add_smtp: (canAddSmtp ? 1 : 0) as 0 | 1,
+          smtp_id: smtpId ? Number(smtpId) : null,
           is_active: active ? 1 : 0,
         },
         token,
       );
       setUrl(cleanUrl);
-      setSaved("Saved");
       onSaved();
       return true;
     } catch (err) {
@@ -147,9 +230,14 @@ export default function CustomerPane({
           </svg>
         </button>
       </div>
-      <div className="flex flex-shrink-0 gap-1 border-b border-gray-200 bg-white px-4 dark:border-gray-800 dark:bg-gray-800">
+      <div className="flex flex-shrink-0 flex-wrap items-center gap-1 border-b border-gray-200 bg-white px-4 py-1 dark:border-gray-800 dark:bg-gray-800">
         {([
           ["customer", "Customer"],
+          ["branding", "Branding"],
+          ["models", "AI models"],
+          ["email", "SMTP Server"],
+          ["password", "Password"],
+          ["misc", "Miscellaneous"],
           ["storage", "Storage"],
           ["users", `Users${customer.users ? ` (${customer.users})` : ""}`],
         ] as const).map(([key, label]) => (
@@ -166,6 +254,37 @@ export default function CustomerPane({
             {label}
           </button>
         ))}
+
+        {/* **On the tab row, not above the content.** On its own line it was
+            a band of white with one button in it, and it read as belonging
+            to the whole pane rather than to what the tabs save. */}
+        {SAVE_TABS.includes(tab) && (
+          <span className="ml-auto flex items-center gap-3 self-center">
+            {saved && <Toast message={saved} type="success" onClose={() => setSaved(null)} />}
+            {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
+            <Button
+              size="xs"
+              onClick={saveEverything}
+              // Disabled while the settings are still being read, but it
+              // does not say "Saving..." for that — only for a real save.
+              disabled={
+                saving ||
+                settingsStatus.saving ||
+                settingsStatus.loading ||
+                !name.trim() ||
+                !url.trim() ||
+                Number(allowed) < 1
+              }
+              startIcon={
+                <svg viewBox="0 0 24 24" fill="currentColor" className="size-4">
+                  <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10z" />
+                </svg>
+              }
+            >
+              {saving || settingsStatus.saving ? "Saving..." : "Save"}
+            </Button>
+          </span>
+        )}
       </div>
 
       {/* The Users screen scrolls its own table under its own header, so it
@@ -183,7 +302,13 @@ export default function CustomerPane({
           /* Accounts: added, enabled, disabled. Which projects they work on
              is the customer administrator's decision, on their own
              screens. */
-          <Users customerId={customer.customer_id} manageProjects={false} />
+          <Users
+            customerId={customer.customer_id}
+            // Its url as well as its id: the Users screen needs it to take
+            // the customer's prefix off a username for display.
+            forCustomerUrl={customer.customer_url}
+            manageProjects={false}
+          />
         ) : tab === "storage" ? (
           /* Where this customer's documents live. Its own tab rather than a
              panel on the Customer tab: it has a list, a search and its own
@@ -191,36 +316,12 @@ export default function CustomerPane({
           <Storage customerId={customer.customer_id} />
         ) : (
           <div className="space-y-4 p-4 pb-10">
-            {/* One Save for the whole pane, above everything it saves.
-                The row and the settings are two records, but two buttons
-                meant somebody could change both and save half. */}
-            <div className="flex items-center justify-end gap-3">
-              {saved && <Toast message={saved} type="success" onClose={() => setSaved(null)} />}
-              {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
-              <Button
-                size="xs"
-                onClick={saveEverything}
-                // Disabled while the settings are still being read, but it
-                // does not say "Saving..." for that — only for a real save.
-                disabled={
-                  saving ||
-                  settingsStatus.saving ||
-                  settingsStatus.loading ||
-                  !name.trim() ||
-                  !url.trim() ||
-                  Number(allowed) < 1
-                }
-                startIcon={
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="size-4">
-                    <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10z" />
-                  </svg>
-                }
-              >
-                {saving || settingsStatus.saving ? "Saving..." : "Save"}
-              </Button>
-            </div>
-
-            <CollapsiblePanel title="Basic Information" storageKey="sys.customer.basic">
+            {/* A plain card, not a collapsible panel. It was one of several
+                stacked down this tab and needed folding away; it is the
+                whole tab now, and a heading that opens and shuts over the
+                only thing on screen is furniture. */}
+            {tab === "customer" && (
+            <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <Label htmlFor="sys-customer-name">Name</Label>
@@ -267,13 +368,13 @@ export default function CustomerPane({
                       role="switch"
                       aria-checked={active}
                       onClick={() => setActive((on) => !on)}
-                      className={`flex h-5 w-9 flex-shrink-0 items-center rounded-full p-0.5 transition-colors ${
+                      className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full p-0.5 transition-colors ${
                         active ? "bg-brand-500" : "bg-gray-300 dark:bg-gray-600"
                       }`}
                     >
                       <span
-                        className={`block size-4 rounded-full bg-white shadow-theme-xs transition-transform ${
-                          active ? "translate-x-4" : ""
+                        className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                          active ? "translate-x-3" : ""
                         }`}
                       />
                     </button>
@@ -282,20 +383,164 @@ export default function CustomerPane({
                     </span>
                   </div>
                 </div>
+
               </div>
-            </CollapsiblePanel>
+            </div>
+            )}
+
+            {/* Which of SmartDoc's models this customer may choose from.
+                Above the card's own AI Models section, because what they
+                may pick from has to be settled before picking a default
+                out of it. Its own Save: an allowlist is a different record
+                from the settings. */}
+            {tab === "models" && (
+              <div className="space-y-4">
+                {/* **Whether they may add models of their own.** Here
+                    rather than beside the project limit: it is about AI
+                    models, and this is the AI models tab. */}
+                <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <span>
+                      <span className="block text-sm font-medium text-gray-800 dark:text-white/90">
+                        Allow creating own models
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={canAddModels}
+                      aria-label="Allow creating own models"
+                      onClick={() => setCanAddModels((on) => !on)}
+                      className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full p-0.5 transition-colors ${
+                        canAddModels ? "bg-brand-500" : "bg-gray-300 dark:bg-gray-600"
+                      }`}
+                    >
+                      <span
+                        className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                          canAddModels ? "translate-x-3" : ""
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <CustomerModels ref={modelsRef} customerId={customer.customer_id} />
+              </div>
+            )}
+
+            {tab === "email" && (
+              <div className="space-y-4">
+                {/* **Which SmartDoc address their mail comes from.**
+                    Chosen here and nowhere else: there is no default
+                    account, so a customer nobody has chosen for is sent no
+                    mail at all — loudly, rather than from whichever address
+                    a flag on another row happened to name. */}
+                <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-gray-800 dark:text-white/90">
+                        Send their mail through
+                      </span>
+                      <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                        An account of their own, if they have one, is used instead of this.
+                      </span>
+                    </span>
+                    <select
+                      value={smtpId}
+                      onChange={(e) => setSmtpId(e.target.value)}
+                      className="h-9 min-w-[18rem] rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 focus:border-brand-300 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                    >
+                      <option value="">Not chosen — no mail is sent</option>
+                      {smtpOptions.map((a) => (
+                        <option key={a.smtp_id} value={a.smtp_id}>
+                          {a.display_name} — {a.from_address}
+                          {a.is_active !== 1 ? " (off)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* The one case the dropdown cannot state for itself:
+                      there is nothing to choose from yet. */}
+                  {smtpOptions.length === 0 && (
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      SmartDoc has no email account yet. Add one on /sys → Email, then choose it
+                      here.
+                    </p>
+                  )}
+                </div>
+
+                {/* **Whether their people's mail may come from their own
+                    server.** With this off, every password link for this
+                    customer comes from SmartDoc's address, which is the
+                    normal arrangement.
+
+                    Turning it off again does **not** move their mail back:
+                    an account they already have goes on carrying it, so
+                    nobody's sender changes behind their back. Removing the
+                    account does that, visibly. */}
+                <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <span>
+                      <span className="block text-sm font-medium text-gray-800 dark:text-white/90">
+                        Allow own SMTP server
+                      </span>
+                      <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                        Their password links then come from their address. Whether that mail is
+                        accepted depends on the SPF and DKIM records on their domain, which are
+                        theirs to set.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={canAddSmtp}
+                      aria-label="Allow own SMTP server"
+                      onClick={() => setCanAddSmtp((on) => !on)}
+                      className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full p-0.5 transition-colors ${
+                        canAddSmtp ? "bg-brand-500" : "bg-gray-300 dark:bg-gray-600"
+                      }`}
+                    >
+                      <span
+                        className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                          canAddSmtp ? "translate-x-3" : ""
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Their account, if they have made one. Read-only here: it
+                    is their server and their password. Absent entirely when
+                    they have none and cannot have one — the dropdown above
+                    already says where their mail comes from. */}
+                <CustomerOwnSmtp
+                  canAdd={false}
+                  customerId={customer.customer_id}
+                  customerName={customer.customer_name}
+                  hideWhenEmpty
+                  useOwn={customer.use_own_smtp !== 0}
+                />
+              </div>
+            )}
 
             {/* How it looks — the same card the customer's own settings
                 page shows, so what SmartDoc sets up for them is what they
-                then see. It draws no Save of its own; the one at the top
-                saves it along with the row above. */}
-            <BrandingCard
-              ref={settingsRef}
-              customerId={customer.customer_id}
-              customerName={customer.customer_name}
-              onToast={setToast}
-              onStatusChange={onSettingsStatus}
-            />
+                then see. **Mounted once and told which section to draw**:
+                all four share one Save, and unmounting would throw away an
+                edit made on another tab before it was pressed. */}
+            <div className={CARD_TABS.includes(tab) ? "" : "hidden"}>
+              <BrandingCard
+                ref={settingsRef}
+                customerId={customer.customer_id}
+                customerName={customer.customer_name}
+                onToast={setToast}
+                onStatusChange={onSettingsStatus}
+                section={tab as "branding" | "password" | "misc"}
+                showOwnModels={false}
+                showOwnSmtp={false}
+              />
+            </div>
 
           </div>
         )}

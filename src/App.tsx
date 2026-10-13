@@ -27,8 +27,10 @@ import SessionExpiredPrompt from "./components/auth/SessionExpiredPrompt";
 const ProjectSelection = lazy(() => import("./pages/AuthPages/ProjectSelection"));
 const SystemCustomers = lazy(() => import("./pages/System/SystemCustomers"));
 const SystemModels = lazy(() => import("./pages/System/SystemModels"));
+const SystemEmail = lazy(() => import("./pages/System/SystemEmail"));
 const SystemSignInSettings = lazy(() => import("./pages/System/SystemSignInSettings"));
 const SignUp = lazy(() => import("./pages/AuthPages/SignUp"));
+const SetPassword = lazy(() => import("./pages/AuthPages/SetPassword"));
 const Digitize = lazy(() => import("./pages/Digitize"));
 const Users = lazy(() => import("./pages/Users"));
 const UserAccess = lazy(() => import("./pages/UserAccess"));
@@ -73,6 +75,16 @@ export default function App() {
           {/* Customer-Specific Route (signin/dashboard - accessible to everyone) */}
           <Route path="/:customerUrl" element={<SignInWithCustomer />} />
 
+          {/* Choosing a password from an emailed link. **Outside
+              ProtectedRoute**, because the person cannot sign in yet — that
+              is what the link is for. The link itself authorises it: signed
+              by smartdoc_api, good for an hour, dead once a password is set.
+
+              It is under the customer's url so the page knows whose rules
+              to apply, and the token travels in the address's `#`, which
+              browsers never send to a server. */}
+          <Route path="/:customerUrl/set-password" element={<SetPassword />} />
+
           {/* Project Selection Route */}
           {/* SmartDoc itself, not a customer. Before the customer routes, so
               "sys" is never read as somebody's sign-in address. */}
@@ -87,9 +99,25 @@ export default function App() {
           <Route element={<SystemLayout />}>
             <Route path="/sys/customers" element={<SystemCustomers />} />
             <Route path="/sys/models" element={<SystemModels />} />
+            {/* Where SmartDoc's mail goes out through. One account is the
+                default; without it no password link can be sent. */}
+            <Route path="/sys/email" element={<SystemEmail />} />
             {/* How people sign in — realm flags, the same for every customer. */}
             <Route path="/sys/sign-in" element={<SystemSignInSettings />} />
           </Route>
+          {/* **In front of the shell, not inside it.** This screen exists to
+              choose between the places the menu lists, so having the menu
+              already on screen offering them was the question and the answer
+              at once. Same frame as signing in. */}
+          <Route
+            path="/:customerUrl/select-project"
+            element={
+              <ProtectedRoute>
+                <ProjectSelection />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Dashboard Layout (protected) */}
           <Route
             element={
@@ -99,9 +127,6 @@ export default function App() {
             }
           >
             <Route path="/:customerUrl" element={<Home />} />
-            {/* Inside the shell, not in front of it: the menu and the user
-                menu are there while a project is still to be chosen. */}
-            <Route path="/:customerUrl/select-project" element={<ProjectSelection />} />
 
             {/* Everything the bell has shown, kept and paged. */}
             <Route path="/:customerUrl/notifications" element={<Notifications />} />

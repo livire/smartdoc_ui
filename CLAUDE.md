@@ -23,6 +23,45 @@ is no manual identifier picker or "New Assignment" button anymore. See
 upload batch used to be tagged with a client-generated UUID that never
 matched a real `assignment` row — both are resolved).
 
+## Two halves of the app, one at a time
+A customer administrator who is also on a project used to see both halves of
+the menu at once — Customer Setup and User Management sitting under Digitize
+and Verify. That is two jobs in one menu and neither of them clearly. Each
+nav group now carries `space: "customer" | "project"`, and the sidebar shows
+only the half you are already in.
+
+**Which half is decided by the address, never by a stored mode.** A mode
+disagrees with the address bar the moment somebody pastes a link or presses
+Back — the same fault this app has been bitten by before. `CUSTOMER_PATHS` in
+`AppSidebar.tsx` lists the customer half; everything else is the project
+half.
+
+**A choice is offered only when there is one to make.** `destinations` on
+`MembershipContext` counts the projects somebody is on plus, for a customer
+administrator, the customer's own screens. With one destination the project
+selector at the top of the menu, the link at the foot, and the chooser screen
+itself all disappear — a selector that can only reselect what is already open
+is a control that does nothing. The four cases:
+
+| Who | Destinations | What they get |
+|---|---|---|
+| One project, not an administrator | 1 | Straight into it. No selector, no chooser. |
+| Administrator, no projects | 1 | Straight to Customer Setup. |
+| Administrator, one project | 2 | The chooser, and the selector in the menu. |
+| Two or more projects | 2+ | The chooser, and the selector. |
+
+**The band at the top of the menu is the only navigator.** It names where
+you are — the project, or *Customer Setup* on the customer's own screens —
+with the folder button beside it that goes to the chooser. It is **not** tied
+to a project being open: the customer screens are a destination too and need
+the same way out. There is no second control at the foot of the menu; there
+was, and a menu with two ways to do one thing reads as two different things.
+`/select-project` lists Customer Setup alongside the projects, so crossing
+halves is one click from there.
+
+**A new nav group must say which half it belongs to.** An untagged group
+shows in both, which is the thing this fixed.
+
 ## Three kinds of session, two answers
 Who the signed-in person is comes from two calls, held in
 `context/MembershipContext.tsx`: `GET /user_project/me/project/:id`
@@ -156,6 +195,24 @@ second step on the same page, and `authService.completePassword` →
 them in. `AuthContext.login` lets that one error through without setting
 `error`, so the page does not go red for a password that was right.
 
+**Usernames carry the customer (2026-10-10).** One Keycloak realm serves
+every customer, so a username exists once across all of them: Keycloak holds
+`acme.jsmith` and the person types `jsmith`. `services/usernameRules.ts` is a
+copy of the rule in `smartdoc_api`, which has the tests — **the viewer has a
+third copy and all three must agree.** `POST /user/provision` composes the
+name on the server from `customer_url`, so the browser never decides it; this
+screen only takes the prefix off for display and puts it back when the edit
+dialog saves. On `/sys` it takes the url from the **`forCustomerUrl` prop**,
+not from context — the context customer there belongs to somebody else or to
+nobody.
+
+**Use `useShortName()` to print a username** (`hooks/useShortName.ts`), never
+`strip()` by hand. Doing it by hand missed sixteen places. The rule it
+encodes: **a name going to a server is the stored one, a name going to a
+screen is shortened.** Getting that backwards broke the viewer's password
+dialog, which posts the name to `auth_api`. Stripping needs the customer, not just the first dot: plenty of
+usernames are `john.smith`.
+
 **Roles are per project, not per user** (`user_project.role_id`: 1 admin,
 2 worker, 4 viewer), so they belong to the membership, not the user row.
 Changing one is a `PUT /user_project/`, which writes the whole row —
@@ -187,6 +244,144 @@ role is in one place.
 Unticking a project clears its row — a role and three privileges left under
 an unticked project read as settings that still apply, and they do not.
 
+## Where the mail comes from
+**Every `/sys` screen supplies its own padding and background** —
+`SystemLayout` gives its children neither, so a screen that forgets sits
+flush against the menu and runs off the right edge. The frame is
+`flex min-h-0 flex-1 flex-col bg-gray-50` outside and
+`min-h-0 flex-1 overflow-auto p-4` inside; SMTP Server and Sign-in were missing it.
+
+`/sys` → SMTP Server holds **SmartDoc's own accounts and nothing else**. A
+customer's server was listed there too, so the page could answer "who sends
+what?" — but it is theirs, it cannot be changed from there, and a list of
+other people's servers is a list nobody running SmartDoc acts on. It is on
+their own SMTP Server tab, where it can be changed.
+
+Each customer is **pointed at one** on `/sys` → the customer → SMTP Server → *Send their mail
+through*. There is no default: a customer with none chosen is sent no mail,
+and the tab says so where the consequence lands rather than in a toast after
+somebody has waited for an email that never came.
+
+That was not the first shape. An `is_default` flag lasted about an hour —
+two ways to end up with a sender meant "where does this customer's mail come
+from?" had two places to look, and moving the flag silently changed the From
+address for every customer nobody had touched.
+
+A customer may add one of their own when SmartDoc has turned on
+*Allow own email server* (`customer.can_add_smtp`), and their people's
+links then come from their address instead.
+`components/customer/CustomerOwnSmtp.tsx` is the card, used twice: on their
+own SMTP Server tab where they can change it, and on `/sys` → a customer → SMTP Server
+with `canAdd={false}`, where it is only shown and tested — it is their server
+and their password. The dropdown lists SmartDoc's accounts only, because
+theirs is used ahead of any of them.
+
+**The customer's card says where their mail comes from, not what it has.**
+With no server of their own it asks `/smtp_account/resolved` and shows the
+sender in the same two lines their own account uses — the address, then
+*Provided by SmartDoc* — or, when SmartDoc has chosen no account for them,
+*"Email server not set by SmartDoc. Please contact your system
+administrator."* The card used to assert "password links come from
+SmartDoc's address", which stopped being true the moment the default was
+removed.
+
+**With both servers available the customer chooses**, in a dropdown on
+their own card, which has **two sections** — *Send our mail through* (the
+picker, and the address it means) and *POPO smtp server* (their own server,
+with Test and the edit buttons).
+
+**They are separate because they are different jobs**: one is whose address
+our mail carries, the other is whether our server is set up and working.
+Tied together, their own server could only be tested while it was the one in
+use — so a server that could not be reached could not be fixed without first
+pointing the mail at it.
+Each by the name on its row — "POPO SMTP", "Smartdoc" — rather than "ours"
+and "theirs", and without the address, because the address of whichever is
+chosen is right beside it. Written through `PUT /smtp_account/use_own`, **by the page's Save and not by
+the dropdown**: it wrote itself on change, which on a page with one Save
+button reads as a setting that did not take. `CustomerOwnSmtpHandle` is the
+same arrangement `BrandingCard` and `CustomerModels` already use.
+
+**It draws its own two cards and is not wrapped in a panel**, unlike every
+other section of `BrandingCard` — a panel around them would be a third
+border around two things that are already separate.
+
+**The picker is always a dropdown**, even with one thing in it: it used to
+disappear when the customer had no server of their own, and a control that
+comes and goes reads as a setting that was taken away. With one option it is
+enabled but can only reselect itself. It freezes only when SmartDoc has set
+them no server, where the one option reads "No server set by SmartDoc" and
+choosing it would mean no mail at all.
+
+**Removing their server asks in a dialog, not `window.confirm`.** The
+browser's box cannot say what else changes, and what else changes is the
+address every password link for these people will carry — so the dialog
+names the server it is about to remove and nothing else.
+
+**The dropdown holding the answer is what says which is in use.** There was
+a line of text under it saying so as well, and a sentence about SPF and DKIM
+under that; both went when the picker moved beside the details. Theirs won simply by existing before, so a
+customer with both could not tell which was carrying their mail and could
+not go back to SmartDoc's without deleting their server. The dropdown is
+absent when SmartDoc has given them nothing: one option is not a choice. The
+row underneath says which is in force, because "we have a server" and "our
+mail goes through it" are two different facts.
+
+**The address and nothing else.** `/smtp_account/resolved` answers `{from,
+own}` on purpose: the host, port and username of SmartDoc's own relay are
+SmartDoc's, and the username is half a credential. That call is skipped on `/sys`
+(`hideWhenEmpty`): it resolves for whoever is asking, and a system
+administrator has no customer, so it would throw.
+
+**Outcomes go to the toast, states stay on the card.** Pressing Test says
+"Connected" or names the refusal in a toast; it used to leave a coloured
+block under the row and a pill beside it, which is a record of something
+that already happened. What stays written on the card is the state — "Email
+server not set by SmartDoc", "no accounts yet" — because that is still true
+when a toast would have faded.
+
+**Test proves the connection, not delivery.** It signs in to the server.
+Whether the mail is then accepted rather than treated as forged is SPF and
+DKIM on the sending domain, which is theirs. The card says so, once, where
+somebody can act on it.
+
+**The port is a `<select>` of 587, 465 and 25**, not a number field. A free
+number would let a customer point SmartDoc at anything listening; the server
+refuses private addresses too, and the form says that before they save
+rather than after.
+
+## Setting a password from an emailed link
+`pages/AuthPages/SetPassword.tsx` at `/:customerUrl/set-password`, **outside
+`ProtectedRoute`** — the person cannot sign in yet, which is what the link is
+for.
+
+**Why it exists.** A customer can ask for 12 characters and a symbol. Those
+rules are SmartDoc's, in `customer_setting`; Keycloak has one policy for the
+whole realm. Both emailed links used to land on Keycloak's own pages, so the
+two moments a password is most often chosen — a new account and a forgotten
+one — enforced 8 characters whatever the customer had set. This page knows
+the customer from the address bar, so it shows the rules as a checklist and
+enforces them.
+
+**The token is in the `#` of the address.** Everything after a `#` stays in
+the browser — never sent to a server, so it cannot reach `smartdoc_api`'s log
+(which records every request URL) or a `Referer` header. The page reads
+`location.hash` once, in state, because navigating inside the app would drop
+it, and sends it in a request body.
+
+**One door for both links** — `passwordLinkService.request(username,
+customerUrl)`. The server decides whether this account needs a first
+password or a replacement; the form used to decide and got it the wrong way
+round, offering "resend the verification email" to somebody who had simply
+forgotten their password. `authService.forgotPassword` and
+`resendVerification` are **gone**: they asked `auth_api` to send Keycloak's
+mails.
+
+The Users screen's "Not verified" mark now calls
+`userManagementService.resendInvite(user_id)` → `POST /user/:id/invite`, and
+`provisionUser` answers `invited: {sent, reason}` in place of
+`verification` — the account exists whether the mail went or not.
+
 ## Caching the setup lists
 `services/cache.ts` — a `Map` in memory, no library and not localStorage, so
 it dies with the tab and can never serve yesterday's answer or the previous
@@ -212,6 +407,28 @@ browser is handed the previous one's users and projects.
 Not cached: the notification count and conditions. The bell re-counts on
 every screen change and every two minutes, and being out of date is the thing
 it exists to fix.
+
+## AI models: who may choose what
+SmartDoc's catalogue is on `/sys` → AI Models. **A customer chooses from the
+models SmartDoc has given them** (`customer_model`, set on `/sys` → the
+customer → AI models), plus any they added themselves when
+`customer.can_add_models` is on. `GET /model_catalogue/offered` answers that
+list, scoped to the caller's customer.
+
+**A model is chosen on the project, nowhere else** (2026-10-12). The
+customer-level Categorise and OCR dropdowns were removed: a default meant two
+places could name a model, and a project inheriting one had to be kept in
+step with it. `Projects.tsx` writes the model id **and** the stage's switch
+together, so they cannot disagree — Manual means the stage does not run, and
+the pipeline only ever looks at the switch.
+
+Two rules the pickers encode, both enforced on the server as well:
+
+- **Tesseract reads and cannot categorise**, so it is not offered under
+  Categorise. Hiding an option is not refusing it.
+- **A model with `retires_on` says so on the option itself** — "stops in
+  9d". Telling somebody after they have chosen is late. After the date the
+  project fails readiness rather than quietly using something else.
 
 ## Two endpoints with caps, and why both broke
 `smartdoc_upload_api` refuses more than **100 files** to

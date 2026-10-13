@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Modal } from "../ui/modal";
 import Button from "../ui/button/Button";
 import Label from "../form/Label";
 import Input from "../form/input/InputField";
 import { authService } from "../../services/authService";
+import { customerService } from "../../services/customerService";
+import { useCustomer } from "../../context/CustomerContext";
 import Toast from "../common/Toast";
 
 /**
@@ -21,13 +23,48 @@ export default function ChangePasswordDialog({
   onClose: () => void;
   onDone: (message: string, type: "success" | "error") => void;
 }) {
+  /**
+   * What this customer asks of a password.
+   *
+   * **Read, not assumed.** This dialog said "At least 8 characters" and
+   * refused anything shorter, whatever the customer had set — so somebody at
+   * a customer asking for 10 and a symbol was told 8 would do, typed one,
+   * and was refused by `auth_api` with a different message. The rules live in
+   * `customer_setting` and are already on this browser: the same cached read
+   * the sign-in form and the Users screen use.
+   */
+  const { customer } = useCustomer();
+  const rules = useMemo(() => {
+    const settings = customer?.customer_id
+      ? customerService.readCachedSettings(Number(customer.customer_id))
+      : null;
+    return {
+      minLength: Number(settings?.password_min_length ?? 8),
+      needsDigit: settings?.password_needs_digit === 1,
+      needsSymbol: settings?.password_needs_symbol === 1,
+      needsCapital: settings?.password_needs_capital === 1,
+    };
+  }, [customer?.customer_id]);
+
+  // Every rule and whether it is met, so somebody sees what is left rather
+  // than being refused once they have finished typing.
+  const checks = (value: string) => {
+    const list = [{ text: `At least ${rules.minLength} characters`, met: value.length >= rules.minLength }];
+    if (rules.needsDigit) list.push({ text: "A number", met: /[0-9]/.test(value) });
+    if (rules.needsCapital) list.push({ text: "A capital letter", met: /[A-Z]/.test(value) });
+    if (rules.needsSymbol) list.push({ text: "A symbol", met: /[^A-Za-z0-9]/.test(value) });
+    return list;
+  };
+
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ready = current.length > 0 && next.length >= 8 && next === again && next !== current;
+  const met = checks(next);
+  const ready =
+    current.length > 0 && met.every((r) => r.met) && next === again && next !== current;
 
   const submit = async () => {
     const username = authService.getStoredUser()?.preferred_username;
@@ -70,10 +107,26 @@ export default function ChangePasswordDialog({
           <Input
             id="pw-next"
             type="password"
-            placeholder="At least 8 characters"
+            placeholder={`At least ${rules.minLength} characters`}
             value={next}
             onChange={(e) => setNext(e.target.value)}
           />
+
+          <ul className="mt-2 space-y-1 rounded-lg bg-gray-50 p-2.5 dark:bg-white/[0.03]">
+            {met.map((rule) => (
+              <li
+                key={rule.text}
+                className={`flex items-center gap-2 text-xs ${
+                  rule.met
+                    ? "text-success-600 dark:text-success-500"
+                    : "text-gray-500 dark:text-gray-400"
+                }`}
+              >
+                <span className="w-3 text-center">{rule.met ? "✓" : "•"}</span>
+                {rule.text}
+              </li>
+            ))}
+          </ul>
         </div>
         <div>
           <Label htmlFor="pw-again">New password again</Label>
@@ -83,7 +136,7 @@ export default function ChangePasswordDialog({
             value={again}
             onChange={(e) => setAgain(e.target.value)}
           />
-          {next.length >= 8 && again && next !== again && (
+          {next.length > 0 && again && next !== again && (
             <p className="mt-1.5 text-xs text-error-600 dark:text-error-400">
               The two passwords are not the same.
             </p>

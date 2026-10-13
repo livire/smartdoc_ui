@@ -8,9 +8,12 @@ import { authService } from "../../services/authService";
 import { avatarService } from "../../services/avatarService";
 import ChangePasswordDialog from "../auth/ChangePasswordDialog";
 import Toast from "../common/Toast";
+import { useShortName } from "../../hooks/useShortName";
 import { LockIcon } from "../../icons";
 
 export default function UserDropdown() {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { customer } = useCustomer();
@@ -46,7 +49,7 @@ export default function UserDropdown() {
 
   const initials =
     [user?.given_name?.[0], user?.family_name?.[0]].filter(Boolean).join("").toUpperCase() ||
-    user?.preferred_username?.[0]?.toUpperCase() ||
+    short(user?.preferred_username)?.[0]?.toUpperCase() ||
     "?";
 
   function toggleDropdown() {

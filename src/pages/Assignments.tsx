@@ -29,11 +29,16 @@ import {
   ASSIGNMENT_STATUS_COLORS as STATUS_COLORS,
   assignmentStageService,
 } from "../services/assignmentStageService";
+import { useShortName } from "../hooks/useShortName";
 
 // Same spans as My Recent Work on the dashboard, so the two never disagree.
 export default function Assignments() {
   const { user } = useAuth();
   const { customer } = useCustomer();
+  // A stored username carries the customer's prefix — `acme.jsmith`. Everyone
+  // named on this screen belongs to this customer, so the prefix is the same
+  // on all of them and says nothing. See `services/usernameRules.ts`.
+  const short = useShortName();
   const { project } = useProject();
 
   const [identifiers, setIdentifiers] = useState<Identifier[]>([]);
@@ -395,7 +400,7 @@ export default function Assignments() {
                 filter. */}
             <div className="w-48">
               <CheckSelect
-                options={users.map((u) => ({ value: String(u.user_id), label: u.username }))}
+                options={users.map((u) => ({ value: String(u.user_id), label: short(u.username) }))}
                 values={filterUserIds}
                 onChange={setFilterUserIds}
                 noun="users"
@@ -558,7 +563,7 @@ export default function Assignments() {
                     {identifierValues.get(String(a.identifier_id)) || `#${a.identifier_id}`}
                   </TableCell>
                   <TableCell className="px-4 py-4 text-sm text-gray-800 dark:text-white/90">
-                    {userById.get(String(currentHolder(a)))?.username || "—"}
+                    {short(userById.get(String(currentHolder(a)))?.username) || "—"}
                   </TableCell>
                   <TableCell className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300">
                     {new Date(a.assignment_date).toLocaleString()}
@@ -668,7 +673,7 @@ export default function Assignments() {
               id="handover-to"
               options={users
                 .filter((u) => String(u.user_id) !== String(currentHolder(actionOn)))
-                .map((u) => ({ value: String(u.user_id), label: u.username }))}
+                .map((u) => ({ value: String(u.user_id), label: short(u.username) }))}
               value={actionUserId}
               onChange={setActionUserId}
               placeholder="Type to search people"
@@ -732,7 +737,7 @@ export default function Assignments() {
             <Label htmlFor="assigned-to">Assign To *</Label>
             <SearchSelect
               id="assigned-to"
-              options={users.map((u) => ({ value: String(u.user_id), label: u.username }))}
+              options={users.map((u) => ({ value: String(u.user_id), label: short(u.username) }))}
               value={newAssignedTo}
               onChange={setNewAssignedTo}
               placeholder="Type to search people"

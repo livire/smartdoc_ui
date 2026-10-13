@@ -69,7 +69,9 @@ export default function SystemSignInSettings() {
   };
 
   return (
-    <>
+    // The same frame as the other system screens: `SystemLayout` gives them
+    // no padding and no background of their own, so each supplies both.
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-gray-50 p-4 dark:bg-gray-900">
       <PageMeta title="Sign-in | SmartDoc System" description="How people sign in to SmartDoc" />
 
       <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
@@ -129,6 +131,6 @@ export default function SystemSignInSettings() {
       {toast && (
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
-    </>
+    </div>
   );
 }

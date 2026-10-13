@@ -290,6 +290,22 @@ export function describeCondition(c: NotificationCondition): { title: string; bo
         title: `API key "${d.key_label}" expires soon`,
         body: `${d.days_left} days left`,
       };
+    case "model_retiring": {
+      // Past the day as well as before it: a warning that disappears when
+      // it starts mattering is the wrong way round.
+      const left = Number(d.days_left);
+      const when =
+        left < 0
+          ? `stopped ${Math.abs(left)} ${Math.abs(left) === 1 ? "day" : "days"} ago`
+          : left === 0
+            ? "stops today"
+            : `${left} ${left === 1 ? "day" : "days"} left`;
+      return {
+        title: `${d.project_name} uses "${d.display_name}", which is being retired`,
+        // What it does there, so somebody knows which dropdown to open.
+        body: `${d.purpose === "read" ? "OCR" : "Categorise"} · ${when}`,
+      };
+    }
     default:
       return { title: c.condition.replace(/_/g, " "), body: null };
   }

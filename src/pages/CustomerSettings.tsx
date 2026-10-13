@@ -9,8 +9,10 @@ import { useMembership } from "../context/MembershipContext";
 import { userManagementService } from "../services/userManagementService";
 import { authService } from "../services/authService";
 import { customerService } from "../services/customerService";
-import NotificationAreasCard from "../components/notifications/NotificationAreasCard";
 import Tabs from "../components/common/Tabs";
+import NotificationAreasCard, {
+  NotificationAreasHandle,
+} from "../components/notifications/NotificationAreasCard";
 import BrandingCard, {
   BrandingCardHandle,
   BrandingCardStatus,
@@ -25,7 +27,7 @@ import BrandingCard, {
  */
 // The four tabs that one Save covers. The other two — Customer and
 // Notifications — save themselves.
-const SETTINGS_TABS = ["branding", "models", "password", "misc"];
+const SETTINGS_TABS = ["branding", "models", "email", "password", "misc"];
 
 export default function CustomerSettings() {
   const { customer, setCustomer } = useCustomer();
@@ -46,25 +48,48 @@ export default function CustomerSettings() {
 
   // The settings card below draws no Save of its own; this screen's one
   // button reaches into it.
-  // Which tab is open. Remembered for this browser, because somebody who
-  // came here to change the logo will come back for the logo.
-  const [tab, setTab] = useState<string>(() => {
-    try {
-      return localStorage.getItem("customer_settings_tab") || "customer";
-    } catch {
-      return "customer";
-    }
-  });
-  const chooseTab = (id: string) => {
-    setTab(id);
-    try {
-      localStorage.setItem("customer_settings_tab", id);
-    } catch {
-      // A private window refuses this. Not worth telling anybody about.
-    }
-  };
+  /**
+   * Which tab is open. **Always the first one on arrival.**
+   *
+   * It used to be remembered for the browser, on the reasoning that
+   * somebody who came to change the logo would come back for the logo. In
+   * practice it meant opening Customer Settings and landing on Password or
+   * Notifications, with no sign of why — the screen looked different every
+   * time without anybody choosing that. Within one visit the tab stays
+   * where it is put; coming back starts at the beginning.
+   */
+  const [tab, setTab] = useState<string>("customer");
+  const chooseTab = (id: string) => setTab(id);
 
   const settingsRef = useRef<BrandingCardHandle>(null);
+  // The two notification lists save with everything else now, so the screen
+  // has one Save rather than one per tab.
+  const workAreasRef = useRef<NotificationAreasHandle>(null);
+  const viewerAreasRef = useRef<NotificationAreasHandle>(null);
+
+  /**
+   * One Save for the screen.
+   *
+   * It used to sit on the tab row and save only the four settings tabs,
+   * with Customer and Notifications saving themselves — three ways to keep
+   * a change on one screen, and no way to tell which applied to what you
+   * had just typed. This writes whatever has changed, wherever it is.
+   */
+  const [savingAll, setSavingAll] = useState(false);
+  const saveEverything = async () => {
+    setSavingAll(true);
+    try {
+      if (canEditRow) await saveRow();
+      await settingsRef.current?.save();
+      await workAreasRef.current?.save();
+      await viewerAreasRef.current?.save();
+
+      // One message for the screen, not one per card.
+      setToast({ message: "Saved", type: "success" });
+    } finally {
+      setSavingAll(false);
+    }
+  };
   const [settingsStatus, setSettingsStatus] = useState<BrandingCardStatus>({
     saving: false,
     loading: true,
@@ -128,7 +153,6 @@ export default function CustomerSettings() {
         allowed_projects: Number(allowed),
         is_active: active ? 1 : 0,
       });
-      setToast({ message: "Customer saved", type: "success" });
       // The cached copy is now wrong. Held for the life of the tab, so
       // without this the sidebar and the sign-in page would go on showing
       // the old name until a reload.
@@ -165,6 +189,7 @@ export default function CustomerSettings() {
             { id: "customer", label: "Customer" },
             { id: "branding", label: "Branding" },
             { id: "models", label: "AI Models" },
+            { id: "email", label: "SMTP Server" },
             { id: "password", label: "Password" },
             { id: "misc", label: "Miscellaneous" },
             { id: "notifications", label: "Notifications" },
@@ -173,22 +198,24 @@ export default function CustomerSettings() {
           onChange={chooseTab}
         />
 
-        {/* The settings card draws no button of its own — this reaches into
-            it. Hidden on Customer and Notifications, which save themselves. */}
-        <div className={`pb-1.5 ${SETTINGS_TABS.includes(tab) ? "" : "hidden"}`}>
+        {/* One Save for the whole screen, on every tab. The cards draw no
+            button of their own — this reaches into them. */}
+        <div className="pb-3">
           <Button
             size="xs"
-            onClick={() => settingsRef.current?.save()}
-            // Disabled while the settings are still being read, but it does
-            // not say "Saving..." for that — only for an actual save.
-            disabled={settingsStatus.saving || settingsStatus.loading || loading}
+            onClick={saveEverything}
+            // Disabled while anything is still being read, but it does not
+            // say "Saving..." for that — only for an actual save.
+            disabled={
+              savingAll || savingRow || settingsStatus.saving || settingsStatus.loading || loading
+            }
             startIcon={
               <svg viewBox="0 0 24 24" fill="currentColor" className="size-4">
                 <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10z" />
               </svg>
             }
           >
-            {settingsStatus.saving ? "Saving..." : "Save"}
+            {savingAll || savingRow || settingsStatus.saving ? "Saving..." : "Save"}
           </Button>
         </div>
         </div>
@@ -203,23 +230,10 @@ export default function CustomerSettings() {
         <div className={tab === "customer" ? "" : "hidden"}>
         <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
           {/* No heading: the tab above already says Customer. */}
+          {/* No button of its own: the screen's Save writes this row too. */}
           <div className="mb-2 flex items-center justify-end gap-3">
-            {!canEditRow ? (
+            {!canEditRow && (
               <span className="text-xs text-gray-500 dark:text-gray-400">Set by SmartDoc</span>
-            ) : (
-              <Button
-                size="xs"
-                onClick={saveRow}
-                disabled={
-                  savingRow ||
-                  loading ||
-                  !name.trim() ||
-                  !url.trim() ||
-                  Number(allowed) < Math.max(1, projectCount ?? 0)
-                }
-              >
-                {savingRow ? "Saving..." : "Save customer"}
-              </Button>
             )}
           </div>
 
@@ -282,13 +296,15 @@ export default function CustomerSettings() {
                   aria-checked={active}
                   disabled={!canEditRow}
                   onClick={() => setActive((on) => !on)}
-                  className={`flex h-5 w-9 flex-shrink-0 items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  // Same size as the notification switches, so two toggles
+                  // on one screen are not two different controls.
+                  className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                     active ? "bg-brand-500" : "bg-gray-300 dark:bg-gray-600"
                   }`}
                 >
                   <span
-                    className={`block size-4 rounded-full bg-white shadow-theme-xs transition-transform ${
-                      active ? "translate-x-4" : ""
+                    className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                      active ? "translate-x-3" : ""
                     }`}
                   />
                 </button>
@@ -316,7 +332,7 @@ export default function CustomerSettings() {
               customerName={customer.customer_name}
               onToast={setToast}
               onStatusChange={onSettingsStatus}
-              section={tab as "branding" | "models" | "password" | "misc"}
+              section={tab as "branding" | "models" | "email" | "password" | "misc"}
             />
           )}
         </div>
@@ -332,17 +348,19 @@ export default function CustomerSettings() {
               : "hidden"
           }
         >
+          {/* Admin beside Viewer, not above it: two short lists stacked
+              pushed everything below them off the screen. */}
           {customer && (
-            <div className="space-y-5">
+            <div className="grid gap-x-8 gap-y-5 lg:grid-cols-2">
               <div>
                 <p className="mb-2 text-sm font-medium text-gray-800 dark:text-white/90">Admin</p>
-                <NotificationAreasCard surface="work" />
+<NotificationAreasCard ref={workAreasRef} surface="work" />
               </div>
               <div>
                 <p className="mb-2 text-sm font-medium text-gray-800 dark:text-white/90">
                   Viewer
                 </p>
-                <NotificationAreasCard surface="viewer" />
+<NotificationAreasCard ref={viewerAreasRef} surface="viewer" />
               </div>
             </div>
           )}

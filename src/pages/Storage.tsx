@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHeader, TableRow } from "../component
 import Button from "../components/ui/button/Button";
 import Label from "../components/form/Label";
 import Input from "../components/form/input/InputField";
-import { PencilIcon, LockIcon, CheckCircleIcon, CloseLineIcon, CopyIcon } from "../icons";
+import { PencilIcon, LockIcon, CheckCircleIcon, CloseLineIcon } from "../icons";
 import Tip from "../components/ui/tooltip/Tip";
 import { useCustomer } from "../context/CustomerContext";
 import { authService } from "../services/authService";
@@ -405,18 +405,6 @@ export default function Storage({
     }
   };
 
-  const copyPath = (path: string) => {
-    navigator.clipboard.writeText(path);
-    setToast({ message: "Path copied", type: "info" });
-  };
-
-  const resolvedPath = (s: StorageRow) =>
-    s.resolved_vault_path || `${s.vault_path.replace(/\/+$/, "")}/${s.customer_storage_id}`;
-
-  // What an operator types into the Vault CLI: it omits the "data/" segment
-  // that the HTTP API requires.
-  const cliPath = (s: StorageRow) => resolvedPath(s).replace("/data/", "/");
-
   return (
     <div className="flex flex-col flex-1 w-full bg-gray-50 dark:bg-gray-900 overflow-hidden min-w-0 min-h-0">
       <PageMeta title="Storage | SmartDoc" description="Where this customer's documents are stored" />
@@ -642,9 +630,6 @@ export default function Storage({
               hint={errors.storage_name}
               onChange={(e) => setForm({ ...form, storage_name: e.target.value })}
             />
-            <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-              What you'll see when picking storage for a project.
-            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -702,10 +687,6 @@ export default function Storage({
                 hint={errors.s3_endpoint}
                 onChange={(e) => setForm({ ...form, s3_endpoint: e.target.value })}
               />
-              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                The public address of the S3 server. Browsers upload straight to it, so it has to be
-                reachable from outside and carry a valid certificate.
-              </p>
             </div>
           )}
 
@@ -719,20 +700,6 @@ export default function Storage({
               hint={errors.vault_path}
               onChange={(e) => setForm({ ...form, vault_path: e.target.value })}
             />
-            <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-              Where the access keys are kept. Only the folder goes here — this storage's own ID is
-              added on the end, so each storage gets its own secret.
-              {editingStorage && (
-                <>
-                  {" "}
-                  This one resolves to{" "}
-                  <code className="text-gray-700 dark:text-gray-300">
-                    {form.vault_path.replace(/\/+$/, "")}/{editingStorage.customer_storage_id}
-                  </code>
-                  .
-                </>
-              )}
-            </p>
           </div>
 
           {!editingStorage && (
@@ -787,26 +754,6 @@ export default function Storage({
               onChange={(e) => setKeyForm({ ...keyForm, secret: e.target.value })}
             />
           </div>
-
-          {keysFor && (
-            <div className="rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-white/[0.03]">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Saved to <code className="text-gray-700 dark:text-gray-300">{resolvedPath(keysFor)}</code>
-                <button
-                  type="button"
-                  onClick={() => copyPath(resolvedPath(keysFor))}
-                  title="Copy path"
-                  className="ml-1.5 align-middle text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                >
-                  <CopyIcon className="inline size-3.5" />
-                </button>
-              </p>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Same thing from the command line:{" "}
-                <code className="text-gray-700 dark:text-gray-300">vault kv put {cliPath(keysFor)} …</code>
-              </p>
-            </div>
-          )}
 
           {keyError && <Toast message={keyError} type="error" onClose={() => setKeyError(null)} />}
 

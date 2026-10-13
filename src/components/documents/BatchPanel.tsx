@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import Badge from "../ui/badge/Badge";
+import { useShortName } from "../../hooks/useShortName";
 import { authService } from "../../services/authService";
 import { uploadService } from "../../services/uploadService";
 import { documentService, Category } from "../../services/documentService";
@@ -257,6 +258,8 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
   onFailuresChange,
   onToast,
 }, ref) {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const { project } = useProject();
   const [review, setReview] = useState<Review | null>(null);
   // The project's categories, for picking one by hand in the viewer.
@@ -1426,7 +1429,7 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
                 <li key={c.assignment_comment_id} className="text-sm text-gray-700 dark:text-gray-300">
                   {c.comment}
                   <span className="ml-2 text-[11px] text-gray-500 dark:text-gray-400">
-                    {c.created_by_username || "Unknown"}
+                    {short(c.created_by_username) || "Unknown"}
                     {c.created_at ? ` · ${new Date(c.created_at).toLocaleString()}` : ""}
                   </span>
                 </li>

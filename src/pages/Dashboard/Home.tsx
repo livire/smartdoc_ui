@@ -18,6 +18,7 @@ import {
   ASSIGNMENT_STATUS_LABELS,
   ASSIGNMENT_STATUS_COLORS,
 } from "../../services/assignmentStageService";
+import { useShortName } from "../../hooks/useShortName";
 import { assignmentLabel } from "../../services/assignmentService";
 import type { MyAssignment, VerifyQueueItem } from "../../services/assignmentStageService";
 
@@ -66,6 +67,8 @@ function IconButton({
 }
 
 export default function Home() {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { project } = useProject();
@@ -469,7 +472,7 @@ export default function Home() {
                 <td className={`${TD} text-gray-800 dark:text-white/90`}>
                   {q.identifier_value || `#${q.assignment?.identifier_id}`}
                 </td>
-                <td className={TD}>{q.captured_by_username || "—"}</td>
+                <td className={TD}>{short(q.captured_by_username) || "—"}</td>
                 <td className={TD}>{q.document_count}</td>
                 <td className={TD}>{q.round}</td>
                 <td className={TD}>

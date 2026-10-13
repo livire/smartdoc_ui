@@ -8,12 +8,15 @@ import {
   MAX_FILE_LABEL,
 } from "../../services/avatarService";
 import Toast from "../common/Toast";
+import { useShortName } from "../../hooks/useShortName";
 
 /**
  * Who is signed in. Everything here comes from the token — this app holds no
  * profile of its own beyond a username.
  */
 export default function UserMetaCard() {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const { user } = useAuth();
   const [avatar, setAvatar] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,7 +78,7 @@ export default function UserMetaCard() {
   const fullName = [user?.given_name, user?.family_name].filter(Boolean).join(" ");
   const initials =
     [user?.given_name?.[0], user?.family_name?.[0]].filter(Boolean).join("").toUpperCase() ||
-    user?.preferred_username?.[0]?.toUpperCase() ||
+    short(user?.preferred_username)?.[0]?.toUpperCase() ||
     "?";
 
   return (
@@ -124,10 +127,10 @@ export default function UserMetaCard() {
         </div>
         <div className="min-w-0">
           <h4 className="text-lg font-semibold text-gray-800 dark:text-white/90">
-            {fullName || user?.preferred_username || "—"}
+            {fullName || short(user?.preferred_username) || "—"}
           </h4>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
-            <span>{user?.preferred_username}</span>
+            <span>{short(user?.preferred_username)}</span>
             {user?.email && (
               <>
                 <span className="hidden h-3.5 w-px bg-gray-300 dark:bg-gray-700 sm:block" />

@@ -34,6 +34,7 @@ const KEYLESS_PROVIDERS = ["tesseract"];
 export const providerNeedsKey = (provider: string) =>
   !KEYLESS_PROVIDERS.includes(provider.toLowerCase());
 
+
 export interface CatalogueModel {
   model_id: number;
   provider: string;
@@ -43,11 +44,74 @@ export interface CatalogueModel {
   display_name: string;
   is_offered: 0 | 1;
   is_active: 0 | 1;
+  /**
+   * Who owns it. **Null is SmartDoc's**; a customer id means that customer
+   * added it and only they can see or choose it.
+   */
+  customer_id?: number | null;
+  /**
+   * The day it stops working, or null for no end date.
+   *
+   * Setting it withdraws the model from anybody choosing now and warns
+   * everybody already using it. It keeps working until the day passes.
+   */
+  retires_on?: string | null;
   endpoint: string;
   created_at: string;
   // Only on a project's settings: which of the two levels chose it.
   source?: "project" | "customer";
 }
+
+/**
+ * Providers that can only read words off a page.
+ *
+ * Tesseract does OCR and nothing else — it cannot look at a scan and say
+ * what kind of document it is. Offering it under Categorise meant a project
+ * could be set to categorise with an engine that has no idea how, and the
+ * failure only appeared once a page went through.
+ */
+const OCR_ONLY_PROVIDERS = ["tesseract"];
+
+export const isOcrOnly = (provider: string) =>
+  OCR_ONLY_PROVIDERS.includes(provider.toLowerCase());
+
+/** Everything that can read a page. All of them can. */
+export const ocrModels = (models: CatalogueModel[]) => models;
+
+/** Everything that can decide what a page is — so, not Tesseract. */
+export const categoriseModels = (models: CatalogueModel[]) =>
+  models.filter((m) => !isOcrOnly(m.provider));
+
+/**
+ * What OCR falls back to when nobody has chosen.
+ *
+ * Tesseract runs inside `smartdoc_ocr_service` with no key and no bill, so
+ * it is the sensible default rather than a blank that means "nothing reads
+ * these pages". Returns null only if SmartDoc offers no Tesseract row at
+ * all, which would be a catalogue somebody has emptied.
+ */
+export const defaultOcrModel = (models: CatalogueModel[]) =>
+  models.find((m) => isOcrOnly(m.provider)) ?? null;
+
+/** SmartDoc's own, as opposed to one a customer added. */
+export const isSmartDocModel = (m: CatalogueModel) =>
+  m.customer_id === null || m.customer_id === undefined;
+
+/**
+ * Days until a model stops, or null when it has no end date.
+ *
+ * Negative once the day has passed, so one answer tells "retires in 3 days"
+ * from "retired 3 days ago". Compared as plain dates: turning both into
+ * `Date` objects drags the browser's timezone in, and a model would retire
+ * at midnight somewhere else.
+ */
+export const daysUntilRetired = (m: CatalogueModel): number | null => {
+  if (!m.retires_on) return null;
+  const day = String(m.retires_on).slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const MS = 24 * 60 * 60 * 1000;
+  return Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / MS);
+};
 
 export const modelCatalogueService = {
   /** The whole catalogue, including what is retired. Sysadmin only. */
@@ -58,7 +122,13 @@ export const modelCatalogueService = {
     return (await response.json()).data || [];
   },
 
-  /** What a customer may choose from. */
+  /**
+   * What the signed-in person's customer may choose from.
+   *
+   * Scoped on the server since 2026-10-12: the SmartDoc models on their
+   * allowlist, plus the ones they added themselves, minus anything past its
+   * last day. It used to answer the whole catalogue to anybody.
+   */
   async offered(): Promise<CatalogueModel[]> {
     const token = await authService.ensureValidToken();
     const response = await fetch(`${API_URL}/model_catalogue/offered`, {
@@ -77,6 +147,30 @@ export const modelCatalogueService = {
     });
     if (!response.ok) throw new Error(await extractMessage(response, "Failed to add the model"));
     return (await response.json()).data;
+  },
+
+  /** The SmartDoc model ids this customer may choose from. */
+  async allowlist(customerId: number): Promise<number[]> {
+    const token = await authService.ensureValidToken();
+    const response = await fetch(`${API_URL}/model_catalogue/allowlist/${customerId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error(await extractMessage(response, "Failed to read the allowlist"));
+    const body = await response.json();
+    return body.data || [];
+  },
+
+  /** Replace it. Whoever runs SmartDoc only. */
+  async setAllowlist(customerId: number, modelIds: number[]): Promise<number[]> {
+    const token = await authService.ensureValidToken();
+    const response = await fetch(`${API_URL}/model_catalogue/allowlist/${customerId}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model_ids: modelIds }),
+    });
+    if (!response.ok) throw new Error(await extractMessage(response, "Failed to save the allowlist"));
+    const body = await response.json();
+    return body.data || [];
   },
 
   async update(input: Partial<CatalogueModel> & { model_id: number }): Promise<CatalogueModel> {

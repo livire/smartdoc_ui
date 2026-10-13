@@ -41,6 +41,15 @@ type NavItem = {
   // Only for a customer administrator, and shown whether or not a project is
   // selected: these screens are about the customer, not about one project.
   customerAdminOnly?: boolean;
+  /**
+   * Which half of the app this group belongs to.
+   *
+   * **A customer administrator who is also on a project saw both halves at
+   * once** — Customer Setup and User Management sitting under Digitize and
+   * Verify — which is two jobs in one menu and neither of them clearly. The
+   * menu now shows one or the other, decided by where you already are.
+   */
+  space?: "customer" | "project";
   // Meaningless without a project, so hidden until one is chosen.
   needsProject?: boolean;
 };
@@ -50,6 +59,7 @@ const navItems: NavItem[] = [
     icon: <GridIcon />,
     name: "Dashboard",
     path: "/",
+    space: "project",
     // The queue and "my work" are both a project's, so there is nothing to
     // show a customer administrator who has not opened one.
     needsProject: true,
@@ -57,6 +67,7 @@ const navItems: NavItem[] = [
   {
     icon: <TaskIcon />,
     name: "Workspace",
+    space: "project",
     needsProject: true,
     // The work, for whoever does it. Digitize and Verify are the two work
     // surfaces — each opens whatever that person is holding. Claiming happens
@@ -91,6 +102,7 @@ const navItems: NavItem[] = [
     // may have none at all.
     name: "Customer Setup",
     customerAdminOnly: true,
+    space: "customer",
     subItems: [
       { name: "Customer", path: "/customer-settings", pro: false },
       { name: "Projects", path: "/projects", pro: false },
@@ -102,6 +114,7 @@ const navItems: NavItem[] = [
     // What one project is made of. A project admin sets these up for the
     // project they are in.
     name: "Project Setup",
+    space: "project",
     adminOnly: true,
     needsProject: true,
     subItems: [
@@ -114,14 +127,33 @@ const navItems: NavItem[] = [
     icon: <GroupIcon />,
     name: "User Management",
     customerAdminOnly: true,
+    space: "customer",
     subItems: [{ name: "Users", path: "/users", pro: false }],
   },
 ];
 
 const othersItems: NavItem[] = [];
 
+/**
+ * The customer half's addresses.
+ *
+ * Which half of the app somebody is in is decided by **where they are**, not
+ * by a stored mode — a mode would disagree with the address bar the moment
+ * somebody pasted a link or pressed Back, and the two front ends have been
+ * bitten by exactly that before (`CLAUDE.md`, "never draw a decision before
+ * the answer that decides it").
+ */
+const CUSTOMER_PATHS = ["/customer-settings", "/projects", "/storage", "/users"];
+
+const spaceOf = (pathname: string, base: string): "customer" | "project" => {
+  const rest = pathname.startsWith(base) ? pathname.slice(base.length) : pathname;
+  return CUSTOMER_PATHS.some((p) => rest === p || rest.startsWith(`${p}/`))
+    ? "customer"
+    : "project";
+};
+
 const AppSidebar: React.FC = () => {
-  const { membership, account } = useMembership();
+  const { membership, account, destinations } = useMembership();
   const { project } = useProject();
   const { customer } = useCustomer();
 
@@ -132,14 +164,36 @@ const AppSidebar: React.FC = () => {
   // not clickable, so the shape of the app is visible before the choice is
   // made and nothing appears to be missing. Admin-only groups wait — who is
   // an admin is a fact about the project, unknown until one is open.
+  const locationNow = useLocation();
   const noProject = !project?.project_id;
   // Every link on this menu is under the customer's url. The context is the
   // first source; the address bar is the second, because the context can be
   // empty for a frame or for a session that never stored the customer —
   // and a bare "/users" is read as a customer called "users".
   const base = `/${customer?.customer_url ?? storedCustomerUrl() ?? ""}`;
+  // Where they are now decides which half of the menu they get. A customer
+  // administrator who is also on a project has both, but never at once.
+  const here = spaceOf(locationNow.pathname, base);
+  // The one link at the foot of the menu points at the chooser whenever
+  // there is no project to go back to, and at the other half otherwise.
+  /**
+   * Whether there is a choice to offer at all.
+   *
+   * Somebody on one project who does not administer the customer has exactly
+   * one place to be, and a selector would only reselect what is already
+   * open. A customer administrator on one project has two — that project
+   * and the customer's own screens — and needs it.
+   *
+   * `null` means not known yet; nothing is drawn until it is, rather than
+   * drawing a control and removing it a frame later.
+   */
+  const hasChoice = destinations !== null && destinations > 1;
+
   const visibleNavItems = navItems
     .filter((nav) => {
+      // One half at a time. An untagged group belongs to both — there are
+      // none today, and a new one should say which it is.
+      if (nav.space && nav.space !== here) return false;
       if (nav.customerAdminOnly) return account.is_customer_admin;
       if (nav.needsProject && noProject) return !nav.adminOnly;
       return !nav.adminOnly || membership.can_setup;
@@ -163,7 +217,7 @@ const AppSidebar: React.FC = () => {
     .filter((nav) => !nav.subItems || nav.subItems.length > 0);
 
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
-  const location = useLocation();
+  const location = locationNow;
 
   const [openSubmenu, setOpenSubmenu] = useState<{
     type: "main" | "others";
@@ -546,10 +600,20 @@ const AppSidebar: React.FC = () => {
           )}
         </Link>
       </div>
-      {/* The project every screen below is about, with what its pipeline does
-          for it: a lit icon means that stage runs by itself, a dim one means
-          it never will. */}
-      {(isExpanded || isHovered || isMobileOpen) && (
+      {/* **Where you are, and the way to somewhere else.** The name of the
+          project — or "Customer Setup" on the customer's own screens — with
+          the button that changes it.
+
+          **Shown exactly when there is a choice** (`hasChoice`), which is
+          what makes it the one navigator in the menu: a customer
+          administrator on one project has two places and gets it, somebody
+          on a single project has one place and does not. Not tied to a
+          project being open, because the customer's screens are a
+          destination too and need the same way out.
+
+          Under it, what the project's pipeline does for it: a lit icon means
+          that stage runs by itself, a dim one means it never will. */}
+      {hasChoice && (isExpanded || isHovered || isMobileOpen) && (
         <div className="-mx-5 mb-6 flex h-17 flex-col justify-center border-y border-gray-200 bg-gray-50 px-5 dark:border-gray-800 dark:bg-white/[0.03]">
           {/* The name of what is open — or that nothing is — with the way
               to choose beside it. The band is a fixed height either way,
@@ -559,27 +623,34 @@ const AppSidebar: React.FC = () => {
             {/* Whether a project is open is known at once; its name takes
                 a request. Until it lands, hold the line's height rather
                 than show the wrong state for a frame. */}
-            {project?.project_id && !projectName ? (
+            {here === "customer" ? (
+              <p className="truncate text-base font-semibold text-gray-800 dark:text-white/90">
+                Customer Setup
+              </p>
+            ) : !project?.project_id ? (
+              <p className="truncate text-base font-semibold text-gray-400 dark:text-gray-500">
+                Select a project
+              </p>
+            ) : !projectName ? (
+              /* The project is known at once; its name takes a request.
+                 Hold the height rather than show the wrong thing for a
+                 frame. */
               <span className="my-1 block h-4 w-32 animate-pulse rounded bg-gray-200 dark:bg-white/10" />
-            ) : project?.project_id ? (
+            ) : (
               <p className="truncate text-base font-semibold text-gray-800 dark:text-white/90">
                 {projectName}
-              </p>
-            ) : (
-              <p className="text-base font-semibold text-gray-400 dark:text-gray-500">
-                No Project Selected
               </p>
             )}
             <Link
               to={`${base}/select-project`}
-              title={project?.project_id ? "Change project" : "Select a project"}
+              title={here === "customer" ? "Go to a project" : "Change project"}
               className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-brand-500/40 bg-brand-500/10 text-brand-500 transition hover:bg-brand-500 hover:text-white"
             >
               <FolderIcon className="size-4 fill-current" />
             </Link>
           </div>
 
-          {autoStages && (
+          {here === "project" && project?.project_id && autoStages && (
             <p className="mt-1 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
               <span className="flex items-center gap-1">
                 <svg
@@ -641,6 +712,16 @@ const AppSidebar: React.FC = () => {
                 </h2>
               )}
               {renderMenuItems(visibleNavItems, "main")}
+
+              {/* **The door between the two halves.**
+                  The menu shows one half at a time, so without this a
+                  customer administrator who opened a project could not get
+                  back to the customer's screens except by editing the
+                  address. One line, at the foot of the group rather than the
+                  top: it is the way out, not the thing you came to do.
+
+                  Only for a customer administrator — nobody else has two
+                  halves to move between. */}
             </div>
             <div className="">
               <h2

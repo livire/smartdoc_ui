@@ -7,6 +7,27 @@ export interface CustomerDetails {
   customer_name: string;
   is_active: number;
   allowed_projects: number;
+  /** Whether SmartDoc has agreed this customer may add AI models. */
+  can_add_models?: 0 | 1;
+  /**
+   * Whether SmartDoc has agreed this customer may send their people's mail
+   * through their own server. Without one, password links come from
+   * SmartDoc's address.
+   */
+  can_add_smtp?: 0 | 1;
+  /**
+   * Which of SmartDoc's email accounts sends this customer's mail. **Null is
+   * the default one.** An account of their own, when they have one, is used
+   * ahead of this.
+   */
+  smtp_id?: number | null;
+  /**
+   * Whether their mail goes through their own server rather than the one
+   * SmartDoc gave them. On by default; means nothing without a server of
+   * their own. **The customer sets this, not SmartDoc** — it is their
+   * server.
+   */
+  use_own_smtp?: 0 | 1;
   customer_url: string;
 }
 
@@ -187,6 +208,15 @@ export const customerService = {
       customer_url: string;
       allowed_projects: number;
       is_active: number;
+      /**
+       * Whether this customer may add AI models of their own. Omit to leave
+       * it alone — the server only writes it when it is sent.
+       */
+      can_add_models?: 0 | 1;
+      /** The same for their own email server. Omit to leave it alone. */
+      can_add_smtp?: 0 | 1;
+      /** Which SmartDoc email account sends their mail; null is the default. */
+      smtp_id?: number | null;
     },
     accessToken: string,
   ): Promise<void> {
@@ -269,6 +299,24 @@ export const customerService = {
   // How this customer's SmartDoc looks: the label and the two logos.
   // Read with the service token, because the sign-in page needs it before
   // anybody has one of their own.
+  /**
+   * One customer's row — the name, the limits, and whether SmartDoc has
+   * agreed they may add AI models.
+   *
+   * Separate from `getSettings`, which reads `customer_setting`: the two are
+   * different tables answering different questions, and a screen that needs
+   * `can_add_models` was otherwise reading the whole customer list to find
+   * one row.
+   */
+  async getById(customerId: number, accessToken: string): Promise<CustomerDetails | null> {
+    const response = await fetch(`${API_BASE_URL}/customer/${customerId}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    return body.data ?? null;
+  },
+
   async getSettings(customerId: number): Promise<{
     customer_label: string | null;
     login_logo: string | null;

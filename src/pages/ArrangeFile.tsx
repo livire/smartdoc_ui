@@ -19,6 +19,7 @@ import {
   ArrangeRecord,
   ProjectDetails,
 } from "../services/documentService";
+import { useShortName } from "../hooks/useShortName";
 
 /**
  * Putting a whole file in order.
@@ -37,6 +38,10 @@ import {
 export default function ArrangeFile() {
   const { project } = useProject();
   const { user } = useAuth();
+  // Only for the move history below: a stored username carries the
+  // customer's prefix (`services/usernameRules.ts`), and everybody in this
+  // list is on this project, so it says nothing.
+  const short = useShortName();
 
   const [projectDetails, setProjectDetails] = useState<ProjectDetails | null>(null);
   const [identifiers, setIdentifiers] = useState<Identifier[]>([]);
@@ -1550,7 +1555,7 @@ export default function ArrangeFile() {
           {history.map((row) => (
             <li key={row.identifier_arrange_id} className="text-sm">
               <p className="text-gray-800 dark:text-white/90">
-                {row.user?.username || `User ${row.user_id}`} moved{" "}
+                {short(row.user?.username) || `User ${row.user_id}`} moved{" "}
                 {row.moved_count === 1 ? "1 page" : `${row.moved_count} pages`}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">

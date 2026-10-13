@@ -11,6 +11,7 @@ import {
   modelCatalogueService,
   CatalogueModel,
   providerNeedsKey,
+  daysUntilRetired,
 } from "../../services/modelCatalogueService";
 
 const emptyModel = {
@@ -19,6 +20,9 @@ const emptyModel = {
   display_name: "",
   endpoint: "",
   is_offered: 1 as 0 | 1,
+  // The day it stops working. Empty is no end date, which is the usual
+  // answer — a date is set when a model is on its way out.
+  retires_on: "",
 };
 
 /**
@@ -95,6 +99,7 @@ export default function SystemModels() {
       display_name: m.display_name,
       endpoint: m.endpoint ?? "",
       is_offered: m.is_offered,
+      retires_on: m.retires_on ? String(m.retires_on).slice(0, 10) : "",
     });
     setIsFormOpen(true);
   };
@@ -108,6 +113,9 @@ export default function SystemModels() {
         display_name: form.display_name.trim(),
         endpoint: form.endpoint.trim(),
         is_offered: form.is_offered,
+        // Null, not "": the column is a date, and an empty string is not
+        // one. Sent either way so clearing the field removes the date.
+        retires_on: form.retires_on ? form.retires_on : null,
       };
       const saved = editing
         ? await modelCatalogueService.update({ ...payload, model_id: editing.model_id })
@@ -196,7 +204,7 @@ export default function SystemModels() {
           <Table>
             <TableHeader className="border-b border-gray-100 dark:border-gray-800">
               <TableRow>
-                {["Name", "Model id", "Provider", "Key", "Offered", ""].map((h, i) => (
+                {["Name", "Model id", "Provider", "Key", "Retires", "Offered", ""].map((h, i) => (
                   <TableCell
                     key={h || i}
                     isHeader
@@ -210,13 +218,13 @@ export default function SystemModels() {
             <TableBody className="divide-y divide-gray-100 dark:divide-gray-800">
               {loading ? (
                 <TableRow>
-                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={6}>
+                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={7}>
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : shown.length === 0 ? (
                 <TableRow>
-                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={6}>
+                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={7}>
                     {term !== ""
                       ? "No model matches that."
                       : "No models yet. Add one, give it a key, and customers can choose it."}
@@ -248,6 +256,28 @@ export default function SystemModels() {
                         <span className="text-warning-600 dark:text-warning-500">Not set</span>
                       )}
                     </TableCell>
+                    {/* **When it stops**, so it is visible without opening
+                        every model. Red once the day has passed, amber
+                        while it is coming, nothing at all when there is no
+                        end date — which is most of them. */}
+                    <TableCell className="whitespace-nowrap px-4 py-3 text-sm">
+                      {(() => {
+                        const days = daysUntilRetired(m);
+                        if (days === null) {
+                          return <span className="text-gray-400">—</span>;
+                        }
+                        const day = String(m.retires_on).slice(0, 10);
+                        return days < 0 ? (
+                          <span className="text-error-600 dark:text-error-500" title={day}>
+                            Retired
+                          </span>
+                        ) : (
+                          <span className="text-warning-600 dark:text-warning-500" title={day}>
+                            {days === 0 ? "Today" : `${days}d`}
+                          </span>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell className="whitespace-nowrap px-4 py-3 text-sm">
                       {/* Not offered is how a model is retired: it leaves the
                           choosers and keeps working for whoever points at it. */}
@@ -256,13 +286,13 @@ export default function SystemModels() {
                         role="switch"
                         aria-checked={m.is_offered === 1}
                         onClick={() => toggleOffered(m)}
-                        className={`flex h-5 w-9 items-center rounded-full p-0.5 transition-colors ${
+                        className={`flex h-4 w-7 items-center rounded-full p-0.5 transition-colors ${
                           m.is_offered === 1 ? "bg-success-500" : "bg-gray-300 dark:bg-gray-600"
                         }`}
                       >
                         <span
-                          className={`block size-4 rounded-full bg-white shadow-theme-xs transition-transform ${
-                            m.is_offered === 1 ? "translate-x-4" : ""
+                          className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                            m.is_offered === 1 ? "translate-x-3" : ""
                           }`}
                         />
                       </button>
@@ -357,6 +387,27 @@ export default function SystemModels() {
               Where this model answers, in full. SmartDoc sends the same kind of
               request to every provider, so this is the only thing that says
               which one it goes to.
+            </p>
+          </div>
+
+          {/* **Retiring a model is a date, not a switch.**
+              Taking one away with no notice leaves a customer's
+              categorisation stopping on a morning nobody chose. A date
+              withdraws it from anybody choosing now, warns everybody
+              already using it, and lets it keep working until the day
+              passes. Clear the field to take the date off again. */}
+          <div>
+            <Label htmlFor="retires_on">Retires on</Label>
+            <Input
+              id="retires_on"
+              compact
+              type="date"
+              value={form.retires_on}
+              onChange={(e) => setForm({ ...form, retires_on: e.target.value })}
+            />
+            <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+              Leave empty for no end date. Setting one stops anybody new choosing this model and
+              warns the customers already using it; it goes on working until the day passes.
             </p>
           </div>
 

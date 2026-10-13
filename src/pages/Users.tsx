@@ -8,6 +8,7 @@ import Label from "../components/form/Label";
 import Input from "../components/form/input/InputField";
 import { PencilIcon, LockIcon } from "../icons";
 import { useCustomer } from "../context/CustomerContext";
+import { qualify, strip } from "../services/usernameRules";
 import { customerService } from "../services/customerService";
 import { Role } from "../context/MembershipContext";
 import { authService, UserProject } from "../services/authService";
@@ -59,6 +60,9 @@ const emptyNewUser = {
   firstName: "",
   lastName: "",
   password: "",
+  // Whether this person sets up the customer. Defaulted on for the first
+  // person at a customer — see `openAddUser`.
+  isCustomerAdmin: false,
 };
 
 /**
@@ -76,12 +80,22 @@ const PRIVILEGE_MARKS = [
 
 export default function Users({
   customerId,
+  forCustomerUrl,
   // Projects are the customer's own business: who works on what is decided
   // by their administrator, not by whoever runs SmartDoc. Given `false`,
   // this screen adds, enables and disables accounts and says no more.
   manageProjects = true,
 }: {
   customerId?: number;
+  /**
+   * That customer's `customer_url`, when this screen is shown from `/sys`
+   * for a customer the signed-in person does not belong to.
+   *
+   * Only used to take the prefix off a username for display. Without it the
+   * list reads `popo.faisal` — the stored name, which is Keycloak's business
+   * and not something anybody wants to look at.
+   */
+  forCustomerUrl?: string;
   manageProjects?: boolean;
 }) {
   // Whose customer this screen is about. The customer in context when one
@@ -117,6 +131,27 @@ export default function Users({
   // Held steady: built fresh on every render it was a new object each time,
   // so every effect that depends on it ran again, which fetched, which
   // rendered — the screen flickered and the network tab filled up.
+  /**
+   * The customer whose prefix to take off a username for display.
+   *
+   * One realm serves every customer, so `user.username` holds `acme.jsmith`
+   * and the screen shows `jsmith` (`services/usernameRules.ts`).
+   *
+   * **From the prop on `/sys`**, never from context: there the screen is
+   * shown for a customer the signed-in person does not belong to, and the
+   * context customer is somebody else's or nobody's. Stripping with the
+   * wrong prefix would take off the wrong piece — or, with none at all,
+   * leave `popo.faisal` on screen, which is what it did until 2026-10-10.
+   */
+  const usernameCustomerUrl = customerId
+    ? forCustomerUrl ?? null
+    : contextCustomer?.customer_url ?? null;
+
+  // Same shape as `useShortName()` elsewhere, but this screen is also
+  // rendered for another customer from `/sys`, so the url comes from the
+  // prop rather than from context.
+  const short = (name?: string | null) => strip(usernameCustomerUrl, name ?? "");
+
   const customer = useMemo(
     () =>
       customerId
@@ -319,7 +354,7 @@ export default function Users({
         setToast({
           message: `Keycloak was updated but the database record failed (${
             err instanceof Error ? err.message : "unknown error"
-          }). "${u.username}" is now out of sync between Keycloak and the database.`,
+          }). "${short(u.username)}" is now out of sync between Keycloak and the database.`,
           type: "error",
         });
         return;
@@ -329,7 +364,7 @@ export default function Users({
         prev.map((row) => (row.user_id === u.user_id ? { ...row, is_active: nextActive } : row))
       );
       setToast({
-        message: `User "${u.username}" ${nextActive === 1 ? "enabled" : "disabled"} successfully${
+        message: `User "${short(u.username)}" ${nextActive === 1 ? "enabled" : "disabled"} successfully${
           u.keycloak_id ? "" : " (no linked Keycloak account — local only)"
         }`,
         type: "success",
@@ -360,7 +395,7 @@ export default function Users({
       const token = await authService.ensureValidToken();
       await userManagementService.setPassword(keycloakId, resetPassword, token);
       setToast({
-        message: `Password set. ${resetFor.username} must choose their own at the next sign-in.`,
+        message: `Password set. ${short(resetFor.username)} must choose their own at the next sign-in.`,
         type: "success",
       });
       setResetFor(null);
@@ -378,7 +413,9 @@ export default function Users({
 
   const openEdit = (u: AppUser) => {
     setSelectedUser(u);
-    setEditUsername(u.username);
+    // The short form, the same as the row shows. `handleEditUser` puts the
+    // prefix back, so somebody editing a name never sees or types it.
+    setEditUsername(short(u.username));
     setEditCustomerRoleId(u.role_id ? String(u.role_id) : "");
     setIsEditOpen(true);
   };
@@ -426,6 +463,7 @@ export default function Users({
           firstName: newUser.firstName.trim(),
           lastName: newUser.lastName.trim(),
           customerId: customer.customer_id,
+          roleId: newUser.isCustomerAdmin ? CUSTOMER_ADMIN_ROLE : null,
         },
         token,
       );
@@ -442,13 +480,13 @@ export default function Users({
     // an administrator thinking the person has a link when they do not, and
     // that person cannot sign in until they follow one.
     setToast(
-      created.verification === "failed"
+      created.invited?.sent === false
         ? {
-            message: `User "${created.username}" was created, but the verification email could not be sent. Use the "Not verified" mark beside their name to try again.`,
+            message: `User "${short(created.username)}" was created, but the email did not go out (${created.invited.reason ?? "no reason given"}). Use the "Not verified" mark beside their name to send it again.`,
             type: "error",
           }
         : {
-            message: `User "${created.username}" created. A link to verify their email is on its way.`,
+            message: `User "${short(created.username)}" created. A link to choose a password is on its way.`,
             type: "success",
           }
     );
@@ -467,7 +505,7 @@ export default function Users({
       const token = await authService.ensureValidToken();
       await userManagementService.updateUser(
         selectedUser.user_id,
-        editUsername.trim(),
+        qualify(usernameCustomerUrl, editUsername),
         customer.customer_id,
         selectedUser.is_active,
         token,
@@ -529,7 +567,11 @@ export default function Users({
               // keeps what was typed so the username can be corrected, but
               // opening the dialog again starts from nothing rather than
               // showing somebody last week's half-filled form.
-              setNewUser(emptyNewUser);
+              // **On by default for the first person at a customer.** There
+              // is nobody else who could be its administrator, and a customer
+              // without one is a customer nobody can set up — no projects, no
+              // storage, no further users.
+              setNewUser({ ...emptyNewUser, isCustomerAdmin: users.length === 0 });
               setIsAddUserOpen(true);
             }}
             startIcon={
@@ -624,7 +666,7 @@ export default function Users({
                         <span className="flex items-center gap-2">
                           <span className="min-w-0">
                             <span className="block truncate font-medium text-gray-800 dark:text-white/90">
-                              {u.username}
+                              {short(u.username)}
                             </span>
                             {fullName(u) && (
                               <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
@@ -664,9 +706,16 @@ export default function Users({
                               onClick={async () => {
                                 setResendingFor(u.username);
                                 try {
-                                  await authService.resendVerification(u.username);
+                                  // SmartDoc's invitation, not Keycloak's
+                                  // verification mail: the link has to land
+                                  // on a page that knows this customer's
+                                  // password rules.
+                                  await userManagementService.resendInvite(
+                                    u.user_id,
+                                    await authService.ensureValidToken(),
+                                  );
                                   setToast({
-                                    message: `Verification link sent to ${detailsFor(u)?.email}.`,
+                                    message: `A link to set a password was sent to ${detailsFor(u)?.email}.`,
                                     type: "success",
                                   });
                                 } catch (err) {
@@ -708,7 +757,7 @@ export default function Users({
                               e.stopPropagation();
                               toggleActive(u);
                             }}
-                            className={`flex h-5 w-9 flex-shrink-0 items-center rounded-full p-0.5 transition-colors disabled:opacity-50 ${
+                            className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full p-0.5 transition-colors disabled:opacity-50 ${
                               isEnabled ? "bg-success-500" : "bg-gray-300 dark:bg-gray-600"
                             }`}
                           >
@@ -716,8 +765,8 @@ export default function Users({
                               <span className="mx-auto block size-3 rounded-full border-2 border-white border-t-transparent animate-spin" />
                             ) : (
                               <span
-                                className={`block size-4 rounded-full bg-white shadow-theme-xs transition-transform ${
-                                  isEnabled ? "translate-x-4" : ""
+                                className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                                  isEnabled ? "translate-x-3" : ""
                                 }`}
                               />
                             )}
@@ -918,6 +967,43 @@ export default function Users({
               />
             </div>
           </div>
+
+          {/* The same switch as the edit dialog, so the answer is in one
+              place rather than "create, then remember to edit". It was only
+              on the edit dialog until 2026-10-10, which meant the first
+              person at a new customer was always made unable to set it up,
+              and somebody had to notice. */}
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+            <span>
+              <span className="block text-sm font-medium text-gray-800 dark:text-white/90">
+                Customer Administrator
+              </span>
+              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                {users.length === 0
+                  ? "The first person at a customer: somebody has to set up projects, storage and the rest."
+                  : "Sets up projects, storage, users and branding for the whole customer. Project roles are separate."}
+              </span>
+            </span>
+
+            <button
+              type="button"
+              role="switch"
+              aria-checked={newUser.isCustomerAdmin}
+              onClick={() =>
+                setNewUser((current) => ({ ...current, isCustomerAdmin: !current.isCustomerAdmin }))
+              }
+              className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full p-0.5 transition-colors ${
+                newUser.isCustomerAdmin ? "bg-brand-500" : "bg-gray-300 dark:bg-gray-600"
+              }`}
+            >
+              <span
+                className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                  newUser.isCustomerAdmin ? "translate-x-3" : ""
+                }`}
+              />
+            </button>
+          </div>
+
           <div className="flex justify-end gap-3 pt-2">
             <Button
               size="xs"
@@ -938,7 +1024,7 @@ export default function Users({
       {/* Edit user modal */}
       <Modal isOpen={isEditOpen} onClose={() => setIsEditOpen(false)} className="max-w-md p-6">
         <h3 className="mb-5 text-lg font-semibold text-gray-800 dark:text-white/90">
-          Edit User: {selectedUser?.username}
+          Edit User: {short(selectedUser?.username)}
         </h3>
         <form onSubmit={handleEditUser} className="space-y-4">
           <div>
@@ -974,15 +1060,15 @@ export default function Users({
                   current === String(CUSTOMER_ADMIN_ROLE) ? "" : String(CUSTOMER_ADMIN_ROLE),
                 )
               }
-              className={`flex h-5 w-9 flex-shrink-0 items-center rounded-full p-0.5 transition-colors ${
+              className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full p-0.5 transition-colors ${
                 editCustomerRoleId === String(CUSTOMER_ADMIN_ROLE)
                   ? "bg-brand-500"
                   : "bg-gray-300 dark:bg-gray-600"
               }`}
             >
               <span
-                className={`block size-4 rounded-full bg-white shadow-theme-xs transition-transform ${
-                  editCustomerRoleId === String(CUSTOMER_ADMIN_ROLE) ? "translate-x-4" : ""
+                className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                  editCustomerRoleId === String(CUSTOMER_ADMIN_ROLE) ? "translate-x-3" : ""
                 }`}
               />
             </button>
@@ -1013,8 +1099,8 @@ export default function Users({
         </h3>
         <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
           {pendingToggle?.nextActive === 0
-            ? `"${pendingToggle?.user.username}" will no longer be able to log in.`
-            : `"${pendingToggle?.user.username}" will be able to log in again.`}
+            ? `"${short(pendingToggle?.user.username)}" will no longer be able to log in.`
+            : `"${short(pendingToggle?.user.username)}" will be able to log in again.`}
         </p>
         <div className="flex justify-end gap-3">
           <Button size="xs" type="button" variant="outline" onClick={() => setPendingToggle(null)}>
@@ -1035,10 +1121,10 @@ export default function Users({
       {resetFor && (
         <Modal isOpen onClose={() => setResetFor(null)} className="max-w-lg p-8">
           <h3 className="mb-2 pr-10 text-lg font-semibold text-gray-800 dark:text-white/90">
-            User: {resetFor.username}
+            User: {short(resetFor.username)}
           </h3>
           <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-            Generate a one-time temporary password for {resetFor.username}. They choose
+            Generate a one-time temporary password for {short(resetFor.username)}. They choose
             their own at the next sign-in — {passwordRulesText.toLowerCase()}
           </p>
 
@@ -1053,7 +1139,7 @@ export default function Users({
                 setResetPassword(e.target.value);
                 setResetCopied(false);
               }}
-              placeholder="At least 8 characters"
+              placeholder={`At least ${passwordRules.minLength} characters`}
               compact
               className="font-mono tracking-wide"
             />

@@ -5,6 +5,7 @@ import Button from "../ui/button/Button";
 import Label from "../form/Label";
 import Input from "../form/input/InputField";
 import Toast from "../common/Toast";
+import { useShortName } from "../../hooks/useShortName";
 
 /**
  * The details the account carries. They live in Keycloak, not in this
@@ -14,6 +15,8 @@ import Toast from "../common/Toast";
  * administrator's to change.
  */
 export default function UserInfoCard() {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const { user, refreshUser } = useAuth();
   const [firstName, setFirstName] = useState(user?.given_name ?? "");
   const [lastName, setLastName] = useState(user?.family_name ?? "");
@@ -92,7 +95,7 @@ export default function UserInfoCard() {
         </div>
         <div>
           <Label htmlFor="profile-username">Username</Label>
-          <Input id="profile-username" compact type="text" value={user?.preferred_username ?? ""} disabled />
+          <Input id="profile-username" compact type="text" value={short(user?.preferred_username)} disabled />
         </div>
         <div>
           <Label htmlFor="profile-email">Email address</Label>

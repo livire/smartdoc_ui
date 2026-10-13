@@ -14,6 +14,7 @@ import {
   AppUser,
   Project,
 } from "../services/userManagementService";
+import { useShortName } from "../hooks/useShortName";
 
 /** What one project row holds, whether or not this person is on it. */
 interface Access {
@@ -89,6 +90,8 @@ function Tick({
 export default function UserAccess() {
   const { customerUrl, userId } = useParams<{ customerUrl: string; userId: string }>();
   const { customer } = useCustomer();
+  // Without this the heading reads "Access — acme.jsmith".
+  const short = useShortName();
   const navigate = useNavigate();
 
   const [person, setPerson] = useState<AppUser | null>(null);
@@ -322,8 +325,12 @@ export default function UserAccess() {
 
   return (
     <>
+      {/* Named like every other screen — "Users | SmartDoc", "Storage |
+          SmartDoc". It carried the person's name as well, which made the
+          one tab that reads differently from all the rest. The name is on
+          the screen itself, where somebody is looking. */}
       <PageMeta
-        title={`Access — ${person?.username ?? ""} | SmartDoc`}
+        title="User Access | SmartDoc"
         description="What this person may do on each project"
       />
       {toast && (
@@ -364,7 +371,7 @@ export default function UserAccess() {
                 <path d="m11 18-6-6 6-6" />
               </svg>
             </span>
-            <span className="truncate">{person?.username ?? "This person"}</span>
+            <span className="truncate">{short(person?.username) || "This person"}</span>
           </Link>
         </h1>
 

@@ -191,16 +191,30 @@ export default function SignInWithCustomer() {
 
         sessionStorage.setItem("projects_checked", "true");
 
-        if (mine.length === 1) {
-          // Nothing to choose between.
-          if (!storedIsMine) setProject(mine[0]);
-        } else if (mine.length > 1 && !storedIsMine) {
-          // A customer administrator with projects of their own still picks
-          // one: being able to set the customer up does not say which
-          // project they mean to work in. Only somebody with none at all
-          // skips the chooser, below.
+        /**
+         * **Count destinations, not projects.**
+         *
+         * A customer administrator's own screens are a place to be, the same
+         * as a project. Counting projects alone sent somebody who
+         * administers the customer and works on one project straight into
+         * that project, every time, with no way to say they meant the other
+         * thing — the chooser never appeared, and the menu's selector was
+         * the only hint the second place existed.
+         */
+        const admin = Boolean((await authService.getMe(token)).is_customer_admin);
+        const destinations = mine.length + (admin ? 1 : 0);
+
+        if (destinations > 1) {
+          // More than one place to be: they say which. A project remembered
+          // from last time does not answer it — they may have signed in to
+          // do the other thing.
           navigate(`/${customerUrl}/select-project`);
           return;
+        }
+
+        if (mine.length === 1 && !storedIsMine) {
+          // The only place there is.
+          setProject(mine[0]);
         }
 
         setProjectChecked(true);

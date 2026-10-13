@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { useAuth } from "../../context/AuthContext";
+import { qualify } from "../../services/usernameRules";
 import { useCustomer } from "../../context/CustomerContext";
 import { EyeCloseIcon, EyeIcon } from "../../icons";
 import Label from "../form/Label";
@@ -9,6 +10,7 @@ import Checkbox from "../form/input/Checkbox";
 import Button from "../ui/button/Button";
 import { customerService, CustomerDetails } from "../../services/customerService";
 import { authService, PASSWORD_CHANGE_REQUIRED, EMAIL_VERIFICATION_REQUIRED } from "../../services/authService";
+import { passwordLinkService } from "../../services/passwordLinkService";
 import LogoPlaceholder from "../common/LogoPlaceholder";
 import Toast from "../common/Toast";
 import { useTheme } from "../../context/ThemeContext";
@@ -26,6 +28,21 @@ export default function SignInForm({
   const { login, isLoading } = useAuth();
   const { customer: contextCustomer, setCustomer, getStoredCustomer } = useCustomer();
   const customer = forCustomer ?? contextCustomer;
+
+  /**
+   * What Keycloak holds for the name somebody typed.
+   *
+   * One realm serves every customer, so a username exists once across all of
+   * them. Keycloak stores `acme.jsmith`; this form knows the customer from
+   * the address bar and composes it. **Every call that names a person goes
+   * through here** — signing in, forgotten passwords, the verification mail,
+   * and setting a first password — because three of the four composing it
+   * and one not is a bug nobody would find until somebody forgot a password.
+   *
+   * With no customer it returns what was typed. A system administrator signs
+   * in on their own form, which has no customer and must not get a prefix.
+   */
+  const keycloakName = (typed: string) => qualify(customer?.customer_url, typed);
 
   // What this customer asks of a password, from the settings already
   // fetched for the logo on this very page. Shown before anybody types:
@@ -54,7 +71,7 @@ export default function SignInForm({
     const previous = forCustomer ? getStoredCustomer() : null;
     if (forCustomer) setCustomer(forCustomer);
     try {
-      await login(username, password);
+      await login(keycloakName(username), password);
     } catch (err) {
       // The password step is not a failure — they carry on to it. Nor is
       // the verification step, where the customer stays chosen so the
@@ -225,7 +242,16 @@ export default function SignInForm({
                     setFormError(null);
                     setForgotState("sending");
                     try {
-                      const answer = await authService.forgotPassword(username.trim());
+                      // **smartdoc_api, not auth_api.** The link has to
+                      // land on a SmartDoc page to apply this customer's
+                      // password rules, and only smartdoc_api can sign one.
+                      // The username goes as typed, with the customer
+                      // beside it: the server composes the stored form, so
+                      // the browser never decides it.
+                      const answer = await passwordLinkService.request(
+                        username,
+                        customer?.customer_url ?? ""
+                      );
                       setForgotMessage(answer);
                       setForgotState("sent");
                     } catch (err) {
@@ -265,7 +291,14 @@ export default function SignInForm({
                       setFormError(null);
                       setResendState("sending");
                       try {
-                        await authService.resendVerification(verifyEmailFor);
+                        // The same one door. The server works out that
+                        // this account needs the invitation — the link that
+                        // proves the address and sets a first password —
+                        // rather than this form deciding.
+                        await passwordLinkService.request(
+                          verifyEmailFor,
+                          customer?.customer_url ?? ""
+                        );
                         setResendState("sent");
                       } catch (err) {
                         setResendState("idle");
@@ -338,7 +371,7 @@ export default function SignInForm({
                       setFormError(null);
                       setSettingPassword(true);
                       try {
-                        await authService.completePassword(username, password, newPassword);
+                        await authService.completePassword(keycloakName(username), password, newPassword);
                         // The password is set; now the ordinary sign-in,
                         // which also checks they belong to this customer.
                         await signIn(username, newPassword);
@@ -363,7 +396,7 @@ export default function SignInForm({
                   >
                     {settingPassword || isLoading ? "Signing in..." : "Set password and sign in"}
                   </Button>
-                  {newPassword.length >= 8 && newPasswordAgain && newPassword !== newPasswordAgain && (
+                  {newPassword.length > 0 && newPasswordAgain && newPassword !== newPasswordAgain && (
                     <p className="mt-2 text-sm text-error-600 dark:text-error-400">
                       The two passwords are not the same.
                     </p>

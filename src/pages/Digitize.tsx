@@ -25,6 +25,7 @@ import { verificationService } from "../services/verificationService";
 import type { Review } from "../services/verificationService";
 import Button from "../components/ui/button/Button";
 import Badge from "../components/ui/badge/Badge";
+import { useShortName } from "../hooks/useShortName";
 import { Dropdown } from "../components/ui/dropdown/Dropdown";
 
 export interface UploadedImage {
@@ -119,6 +120,8 @@ const formatAssignedMoment = (value: string) => {
 };
 
 export default function Digitize() {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const { project } = useProject();
   const { user } = useAuth();
   const [selectedIdentifier, setSelectedIdentifier] = useState<number | null>(null);
@@ -260,7 +263,7 @@ export default function Digitize() {
                       ? "sent back"
                       : `status ${st.stage_status}`
             }`,
-            who: st.assigned_to_username ?? null,
+            who: short(st.assigned_to_username) || null,
             when: st.completed_at || st.started_at,
           })),
       );
@@ -1602,7 +1605,7 @@ export default function Digitize() {
                       <span className="truncate">
                         Sent back
                         {activeAssignment.returned_by_username
-                          ? ` by ${activeAssignment.returned_by_username}`
+                          ? ` by ${short(activeAssignment.returned_by_username)}`
                           : ""}
                         : {activeAssignment.return_reason}
                       </span>

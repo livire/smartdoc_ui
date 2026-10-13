@@ -301,6 +301,27 @@ export const userManagementService = {
   },
 
   /**
+   * Send somebody their invitation again — the "Not verified" mark.
+   *
+   * **SmartDoc's link, not Keycloak's verification mail.** That mail led to
+   * a Keycloak page, which knows one password policy for the whole realm and
+   * so could not apply this customer's rules. The link this sends lands on
+   * `/:customerUrl/set-password`, which can.
+   */
+  async resendInvite(userId: number, accessToken: string): Promise<void> {
+    const response = await fetch(`${API_URL}/user/${userId}/invite`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(await extractMessage(response, "Could not send the email"));
+    }
+  },
+
+  /**
    * Create a person: the Keycloak account and the SmartDoc row, in one call.
    *
    * **Who may is decided by `smartdoc_api`**, on SmartDoc's own roles. It
@@ -313,9 +334,27 @@ export const userManagementService = {
    * account with nothing pointing at it.
    */
   async provisionUser(
-    input: { username: string; email: string; firstName: string; lastName: string; customerId: number },
+    input: {
+      username: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      customerId: number;
+      /** 3 makes them a customer administrator; omitted leaves them ordinary. */
+      roleId?: number | null;
+    },
     accessToken: string,
-  ): Promise<{ user_id: number; username: string; verification?: "sent" | "failed" }> {
+  ): Promise<{
+    user_id: number;
+    username: string;
+    /**
+     * Whether the invitation went out. **The account exists either way** —
+     * a refused SMTP connection must not undo somebody's creation, so the
+     * server reports it rather than throwing, and the screen offers to send
+     * it again.
+     */
+    invited?: { sent: boolean; reason: string | null };
+  }> {
     const response = await fetch(`${API_URL}/user/provision`, {
       method: "POST",
       headers: {
@@ -328,6 +367,7 @@ export const userManagementService = {
         firstName: input.firstName,
         lastName: input.lastName,
         customer_id: input.customerId,
+        ...(input.roleId ? { role_id: input.roleId } : {}),
       }),
     });
 

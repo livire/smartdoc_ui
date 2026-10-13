@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal } from "../ui/modal";
 import Button from "../ui/button/Button";
+import { useShortName } from "../../hooks/useShortName";
 import { authService } from "../../services/authService";
 import { verificationService } from "../../services/verificationService";
 import { assignmentLabel } from "../../services/assignmentService";
@@ -34,6 +35,8 @@ export default function NotesHistoryDialog({
   assignment: { assignment_id: number; assignment_code?: string | null; assignment_notes?: string | null };
   onClose: () => void;
 }) {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const [history, setHistory] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,7 +51,7 @@ export default function NotesHistoryDialog({
           // What people said about the batch as a whole.
           ...review.batch_comments.map((c) => ({
             key: `comment-${c.assignment_comment_id}`,
-            who: c.created_by_username ?? null,
+            who: short(c.created_by_username) || null,
             when: c.created_at,
             what: "Note",
             text: c.comment,
@@ -59,7 +62,7 @@ export default function NotesHistoryDialog({
             .filter((st) => st.started_at || st.completed_at || st.notes)
             .map((st) => ({
               key: `stage-${st.assignment_stage_id}`,
-              who: st.assigned_to_username ?? null,
+              who: short(st.assigned_to_username) || null,
               when: st.completed_at || st.started_at,
               what:
                 st.stage_status === 4

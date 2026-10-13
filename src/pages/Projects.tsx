@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageMeta from "../components/common/PageMeta";
 import Toast from "../components/common/Toast";
 import { Modal } from "../components/ui/modal";
@@ -10,12 +10,18 @@ import { CheckCircleIcon, CloseLineIcon } from "../icons";
 import { useCustomer } from "../context/CustomerContext";
 import { customerService } from "../services/customerService";
 import IdentifierPushCard from "../components/projects/IdentifierPushCard";
-import NotificationAreasCard from "../components/notifications/NotificationAreasCard";
+import NotificationAreasCard, {
+  NotificationAreasHandle,
+} from "../components/notifications/NotificationAreasCard";
 import {
   modelCatalogueService,
   projectReadinessService,
   CatalogueModel,
   ProjectReadiness,
+  ocrModels,
+  categoriseModels,
+  isSmartDocModel,
+  daysUntilRetired,
 } from "../services/modelCatalogueService";
 import Tabs from "../components/common/Tabs";
 import { authService } from "../services/authService";
@@ -31,6 +37,12 @@ const emptyNewProject = {
 };
 
 // What a project gets if the operator accepts the suggested setup: enhance and
+// How wide the project list may be dragged. Below the minimum the names
+// truncate to nothing; above the maximum the settings beside it start
+// wrapping.
+const LIST_MIN = 200;
+const LIST_MAX = 520;
+
 // categorise on arrival, verified by a person, and a worker may verify their
 // own batch. Storage is deliberately not in here — nothing can guess which
 // bucket a project should write to.
@@ -80,21 +92,40 @@ type DetailForm = {
   read_model_id: string;
 };
 
+/**
+ * The switches that have no model behind them.
+ *
+ * **Categorise and OCR are not here.** Each used to be a checkbox beside a
+ * model dropdown, and the two could say different things — the switch on
+ * with no model meant every page went to a service that could not do the
+ * work. They are now one control each: the dropdown says Manual, a model,
+ * or whatever the customer chose, and "Manual" is what switching the stage
+ * off means. See `MODEL_CHOICE` below.
+ */
+/**
+ * One model in a picker, with the day it stops if it has one.
+ *
+ * **Said on the option itself**, not only in a warning underneath: somebody
+ * scanning the list is choosing, and "retires in 9 days" after they have
+ * chosen is late.
+ */
+function ModelOption({ model }: { model: CatalogueModel }) {
+  const days = daysUntilRetired(model);
+  const note =
+    days === null ? "" : days < 0 ? " — retired" : days === 0 ? " — stops today" : ` — stops in ${days}d`;
+  return (
+    <option value={String(model.model_id)} className="dark:bg-gray-900">
+      {model.display_name}
+      {note}
+    </option>
+  );
+}
+
 const AUTOMATION: { key: keyof DetailForm; label: string; hint: string }[] = [
   {
     key: "auto_process",
     label: "Auto Enhance",
     hint: "Crop black edges and correct brightness as soon as a document arrives.",
-  },
-  {
-    key: "auto_analyze",
-    label: "Auto Categorize",
-    hint: "Send each document to the recognition model and assign a category.",
-  },
-  {
-    key: "auto_ocr",
-    label: "Auto OCR",
-    hint: "Read the words off each document so they can be searched.",
   },
   {
     key: "auto_verify",
@@ -130,10 +161,6 @@ export default function Projects() {
   // dropdown can say what "follow the customer" works out to rather than
   // leaving somebody to go and look.
   const [offeredModels, setOfferedModels] = useState<CatalogueModel[]>([]);
-  const [resolvedModels, setResolvedModels] = useState<{
-    categorise: string | null;
-    read: string | null;
-  }>({ categorise: null, read: null });
   // What this project still needs before it can take a document.
   const [readiness, setReadiness] = useState<ProjectReadiness | null>(null);
 
@@ -169,29 +196,120 @@ export default function Projects() {
       cancelled = true;
     };
   }, []);
-  // Which tab of the project's detail is open. Remembered for this browser.
-  const [tab, setTab] = useState<string>(() => {
-    try {
-      return localStorage.getItem("project_detail_tab") || "general";
-    } catch {
-      return "general";
-    }
-  });
-  const chooseTab = (id: string) => {
-    setTab(id);
-    try {
-      localStorage.setItem("project_detail_tab", id);
-    } catch {
-      // A private window refuses this.
-    }
-  };
+  /**
+   * Which tab of the selected project is open. **Always the first one on
+   * arrival** — see `CustomerSettings.tsx` for why it is no longer
+   * remembered between visits.
+   */
+  const [tab, setTab] = useState<string>("general");
+  const chooseTab = (id: string) => setTab(id);
 
   const [form, setForm] = useState<DetailForm | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // The notification lists hold their changes, so this screen's Save has to
+  // write them along with everything else — otherwise a switch somebody
+  // pressed on that tab would be dropped on the way out.
+  const workAreasRef = useRef<NotificationAreasHandle>(null);
+  const viewerAreasRef = useRef<NotificationAreasHandle>(null);
   // How many projects this customer may have. Read fresh, not from the copy
   // stored at sign-in: whoever runs SmartDoc can raise it while this screen
   // is open, and a stale limit would refuse a project the server allows.
   const [allowedProjects, setAllowedProjects] = useState<number | null>(null);
+
+  /**
+   * How wide the project list is, and whether it is there at all.
+   *
+   * Read from the browser in the initial state, never in an effect: set
+   * afterwards, the panel is drawn at its default width and jumps to the
+   * remembered one a frame later.
+   */
+  const [listWidth, setListWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem("projects_list_width"));
+    return Number.isFinite(saved) && saved >= LIST_MIN && saved <= LIST_MAX ? saved : 288;
+  });
+  const [listOpen, setListOpen] = useState<boolean>(
+    () => localStorage.getItem("projects_list_open") !== "0",
+  );
+  // Kept in step with the state so the drag can read it without closing
+  // over a stale value.
+  useEffect(() => {
+    latestWidth.current = listWidth;
+  }, [listWidth]);
+  const dragging = useRef(false);
+  // Measured rather than assumed: the menu to the left of this panel
+  // collapses to a rail, so the panel's own left edge moves.
+  const listRef = useRef<HTMLElement>(null);
+  const latestWidth = useRef(0);
+
+  /**
+   * Dragging the divider.
+   *
+   * Listeners on the window rather than the handle: the pointer leaves a
+   * 4px strip immediately, and a handler bound to the handle stops being
+   * called the moment it does.
+   */
+  const startDrag = useCallback(() => {
+    dragging.current = true;
+    // While dragging, nothing on the page should select or show an I-beam.
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  }, []);
+
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const left = listRef.current?.getBoundingClientRect().left ?? 0;
+      const next = Math.min(LIST_MAX, Math.max(LIST_MIN, e.clientX - left));
+      latestWidth.current = next;
+      setListWidth(next);
+    };
+    const up = () => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      // Written on release, not on every pixel of the drag. From a ref
+      // rather than a state updater: a side effect inside one runs twice
+      // under StrictMode.
+      localStorage.setItem("projects_list_width", String(latestWidth.current));
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, []);
+
+  const toggleList = () => {
+    setListOpen((open) => {
+      localStorage.setItem("projects_list_open", open ? "0" : "1");
+      return !open;
+    });
+  };
+
+  /**
+   * Whether this project would actually categorise anything.
+   *
+   * A blank choice on the project means "use the customer's"; a blank
+   * choice there means Manual — somebody picks the category by hand. So
+   * the question is whether anything resolves at all.
+   *
+   * **Auto Categorize cannot be on without one.** The pipeline routes on
+   * the switch alone: with it on, every page is published to
+   * `smartdoc.analyze`, and the categoriser then has no model to use and
+   * the page fails at the far end. Keeping the switch and the model in step
+   * here means the pipeline only ever has to look at the switch.
+   */
+  /**
+   * The value meaning "nothing runs this stage here".
+   *
+   * A real value rather than "", because "" is what the select shows when
+   * nothing matches — and a stage with no model has to be a deliberate
+   * answer, not the absence of one.
+   */
+  const MANUAL = "manual";
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.project_id === selectedId) || null,
@@ -218,7 +336,9 @@ export default function Projects() {
     const query = search.trim().toLowerCase();
     if (!query) return projects;
     return projects.filter(
-      (p) => p.project_name.toLowerCase().includes(query) || String(p.project_id).includes(query)
+      // The name only: the id is no longer shown, so matching on it would
+      // hide rows for a reason nobody can see.
+      (p) => p.project_name.toLowerCase().includes(query)
     );
   }, [projects, search]);
 
@@ -276,10 +396,6 @@ export default function Projects() {
         categorise_model_id:
           result?.categorise_model_id != null ? String(result.categorise_model_id) : "",
         read_model_id: result?.read_model_id != null ? String(result.read_model_id) : "",
-      });
-      setResolvedModels({
-        categorise: result?.categorise_model?.display_name ?? null,
-        read: result?.read_model?.display_name ?? null,
       });
       projectReadinessService
         .check(project.project_id)
@@ -441,6 +557,9 @@ export default function Projects() {
         await projectSettingService.create({ ...flags, project_id: selectedProject.project_id }, token);
       }
 
+      await workAreasRef.current?.save();
+      await viewerAreasRef.current?.save();
+
       setToast({ message: "Project saved", type: "success" });
       await loadAll({ silent: true });
       await loadDetail(
@@ -469,10 +588,85 @@ export default function Projects() {
 
       {/* Master / detail */}
       <div className="flex flex-1 min-h-0 min-w-0">
-        {/* Master: the project list */}
-        <aside className="flex w-72 xl:w-80 flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+        {/* Master: the project list. Width is dragged and remembered; it
+            can be folded away entirely when the settings beside it need the
+            room. */}
+        {!listOpen ? (
+          <button
+            type="button"
+            onClick={toggleList}
+            title="Show the project list"
+            className="flex w-8 flex-shrink-0 flex-col items-center gap-2 border-r border-gray-200 bg-white pt-3 text-gray-500 hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-white/[0.03] dark:hover:text-white"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="size-4">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+            {/* The name reads bottom-to-top so the rail stays 32px wide. */}
+            <span className="text-xs font-medium [writing-mode:vertical-rl]">Projects</span>
+          </button>
+        ) : (
+        <aside
+          ref={listRef}
+          style={{ width: listWidth }}
+          className="relative flex flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
           <div className="flex-shrink-0 border-b border-gray-100 p-3 dark:border-gray-800">
+            {/* Row one: the way to fold the list away, what it holds, and
+                the way to add to it. Row two is the search on its own,
+                which needs the width more than anything here. */}
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleList}
+                title="Hide the project list"
+                className="flex size-8 flex-shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.05] dark:hover:text-white"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="size-4">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              {/* A chip rather than a line of text: it is a count against a
+                  limit, which reads as a badge. Tinted red once there is no
+                  room left — the New button beside it is already disabled,
+                  so no sentence is needed. */}
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                  !loading && allowedProjects !== null && projects.length >= allowedProjects
+                    ? "bg-error-50 text-error-600 dark:bg-error-500/10 dark:text-error-500"
+                    : "bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"
+                }`}
+              >
+                {loading
+                  ? "Projects"
+                  : allowedProjects !== null
+                  ? `Limit ${allowedProjects} · Remaining ${Math.max(0, allowedProjects - projects.length)}`
+                  : `${filteredProjects.length} project${filteredProjects.length === 1 ? "" : "s"}`}
+              </span>
+
+              {/* Only while a search is narrowing the list. */}
+              {!loading && filteredProjects.length !== projects.length && (
+                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
+                  {filteredProjects.length} shown
+                </span>
+              )}
+
+              </div>
+              <Button
+                size="xs"
+                onClick={() => setIsAddOpen(true)}
+                // Greyed rather than hidden at the limit: the chip beside it
+                // says why, and a button that vanished would leave people
+                // hunting for it.
+                disabled={
+                  (allowedProjects !== null && projects.length >= allowedProjects) ||
+                  !storages.some((row) => row.is_active === 1)
+                }
+              >
+                New
+              </Button>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <span className="absolute -translate-y-1/2 pointer-events-none left-3 top-1/2">
                   <svg
@@ -499,47 +693,18 @@ export default function Projects() {
                   className="h-9 w-full rounded-lg border border-gray-200 bg-transparent py-2 pl-9 pr-3 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800"
                 />
               </div>
-              <Button
-                size="xs"
-                onClick={() => setIsAddOpen(true)}
-                // Greyed rather than hidden at the limit: the count beneath
-                // says why, and a button that vanished would leave people
-                // hunting for it.
-                disabled={
-                  (allowedProjects !== null && projects.length >= allowedProjects) ||
-                  !storages.some((row) => row.is_active === 1)
-                }
-              >
-                New
-              </Button>
             </div>
+
+            {/* Nowhere for a project to live yet. On its own line because
+                it is a sentence, not a count — in the row above it wrapped
+                and pushed the New button down. */}
+            {!loading && !storages.some((row) => row.is_active === 1) && (
+              <p className="mt-2 text-xs font-medium text-warning-600 dark:text-warning-500">
+                No storage yet — add one under Setup → Storage
+              </p>
+            )}
+
             {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
-            {/* How many, against how many the customer is allowed. The
-                count itself carries the news: red once there is no room
-                left, blue while there is. The New button beside it is
-                already disabled at the limit, so no sentence is needed. */}
-            <p
-              className={`mt-2 text-xs font-medium ${
-                !loading && allowedProjects !== null && projects.length >= allowedProjects
-                  ? "text-error-600 dark:text-error-500"
-                  : "text-brand-500"
-              }`}
-            >
-              {loading
-                ? "Projects"
-                : allowedProjects !== null
-                ? `${projects.length} of ${allowedProjects} project${allowedProjects === 1 ? "" : "s"}${
-                    filteredProjects.length !== projects.length ? ` · ${filteredProjects.length} shown` : ""
-                  }`
-                : `${filteredProjects.length} project${filteredProjects.length === 1 ? "" : "s"}`}
-              {/* Nowhere for a project to live yet. Said here because this is
-                  where somebody looks for the New button. */}
-              {!loading && !storages.some((row) => row.is_active === 1) && (
-                <span className="ml-1 text-warning-600 dark:text-warning-500">
-                  — no storage defined yet; add one under Setup → Storage first
-                </span>
-              )}
-            </p>
           </div>
           <div className="flex-1 overflow-auto">
           {loading ? (
@@ -577,7 +742,6 @@ export default function Projects() {
                           {p.identifier_label}
                         </span>
                       </span>
-                      <span className="text-xs text-gray-400">{p.project_id}</span>
                     </button>
                   </li>
                 );
@@ -585,7 +749,23 @@ export default function Projects() {
             </ul>
           )}
           </div>
+
+          {/* The divider. A 4px strip with a wider invisible grab area, so
+              it can be caught without hunting for it. Double-click puts it
+              back to the width it started at. */}
+          <div
+            onMouseDown={startDrag}
+            onDoubleClick={() => {
+              setListWidth(288);
+              localStorage.setItem("projects_list_width", "288");
+            }}
+            title="Drag to resize, double-click to reset"
+            className="group absolute right-0 top-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize"
+          >
+            <div className="mx-auto h-full w-0.5 bg-transparent transition-colors group-hover:bg-brand-500/60" />
+          </div>
         </aside>
+        )}
 
         {/* Detail: the selected project and its settings */}
         <section className="flex flex-1 flex-col min-h-0 min-w-0">
@@ -708,7 +888,6 @@ export default function Projects() {
                   <Tabs
                     tabs={[
                       { id: "general", label: "Project" },
-                      { id: "models", label: "AI models" },
                       { id: "storage", label: "Storage" },
                       // Only once the project has a settings row: the
                       // webhook card needs one to show anything.
@@ -745,16 +924,124 @@ export default function Projects() {
                           value={form.identifier_label}
                           onChange={(e) => setForm({ ...form, identifier_label: e.target.value })}
                         />
-                        <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                          What this project calls the number documents are grouped under.
-                        </p>
                       </div>
                       </div>
 
                       <div className="space-y-2.5">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                          On arrival
-                        </p>
+                        {/* Which model does each stage, now that the stage's
+                            switch IS the model choice. One per row: the
+                            label and the inherited name together are wider
+                            than half a column. */}
+                        <div className="space-y-3">
+                          {(
+                            [
+                              ["categorise", "categorise_model_id", "Categorise"],
+                              ["read", "read_model_id", "OCR"],
+                            ] as const
+                          ).map(([purpose, field, label]) => {
+                            // Tesseract reads and does not categorise, so it is
+                            // not offered under Categorise.
+                            const reading = purpose === "read";
+                            const all = reading
+                              ? ocrModels(offeredModels)
+                              : categoriseModels(offeredModels);
+                            // SmartDoc's, then this customer's own.
+                            const mine = all.filter(isSmartDocModel);
+                            const theirs = all.filter((m) => !isSmartDocModel(m));
+                            // The column this stage's switch lives in. Written
+                            // with the model so the two always agree.
+                            const switchField = reading
+                              ? ("auto_ocr" as const)
+                              : ("auto_analyze" as const);
+                            /**
+                             * What "no model" is called for this stage.
+                             *
+                             * Categorising without a model is a real way to
+                             * work: somebody picks the category by hand.
+                             * Reading without one is not — nobody types a
+                             * page out — so for OCR it is simply off, and
+                             * the words are not searchable.
+                             */
+                            const noneLabel = reading ? "Off" : "Manual";
+                            return (
+                              <div key={field}>
+                                <Label htmlFor={field}>{label}</Label>
+                                <select
+                                  id={field}
+                                  value={form[field] || MANUAL}
+                                  onChange={(e) => {
+                                    const chosen = e.target.value;
+                                    // One control, two columns. A model named
+                                    // means the stage runs; Manual means it
+                                    // does not. There is no third answer now
+                                    // that customer-wide defaults are gone.
+                                    const named = chosen !== MANUAL && Boolean(chosen);
+                                    setForm({
+                                      ...form,
+                                      [field]: named ? chosen : "",
+                                      [switchField]: named,
+                                    });
+                                  }}
+                                  className="h-9 w-full rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                                >
+                                  {/* **Nothing runs this stage here.**
+                                      First, because it is the plainest
+                                      answer: the page is never published to
+                                      that queue, so no service is asked to
+                                      do work it cannot do.
+
+                                      There is no "use the customer's
+                                      choice" any more — customer-wide
+                                      defaults were removed on 2026-10-12,
+                                      so a project either names a model or
+                                      does not run the stage. One answer,
+                                      one place. */}
+                                  <option value={MANUAL} className="dark:bg-gray-900">
+                                    {noneLabel}
+                                  </option>
+
+                                  {/* **Two groups, when there are two.**
+                                      SmartDoc's models can be withdrawn or
+                                      retired under this customer; their own
+                                      cannot, and the key is theirs. A single
+                                      heading over everything is noise, so
+                                      the groups only appear when both have
+                                      something in them. */}
+                                  {mine.length === 0 ? (
+                                    theirs.map((m) => (
+                                      <ModelOption key={m.model_id} model={m} />
+                                    ))
+                                  ) : theirs.length === 0 ? (
+                                    mine.map((m) => (
+                                      <ModelOption key={m.model_id} model={m} />
+                                    ))
+                                  ) : (
+                                    <>
+                                      <optgroup label="SmartDoc models">
+                                        {mine.map((m) => (
+                                          <ModelOption key={m.model_id} model={m} />
+                                        ))}
+                                      </optgroup>
+                                      <optgroup label="Your models">
+                                        {theirs.map((m) => (
+                                          <ModelOption key={m.model_id} model={m} />
+                                        ))}
+                                      </optgroup>
+                                    </>
+                                  )}
+                                </select>
+                                {all.length === 0 && (
+                                  <p className="mt-1.5 text-xs text-warning-600 dark:text-warning-500">
+                                    {reading
+                                      ? "SmartDoc offers no reading engine yet."
+                                      : "SmartDoc offers no model that can categorise yet."}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
                         {AUTOMATION.map((item) => (
                         <div key={item.key}>
                           <Checkbox
@@ -763,57 +1050,14 @@ export default function Projects() {
                             checked={Boolean(form[item.key])}
                             onChange={(checked) => setForm({ ...form, [item.key]: checked })}
                           />
-                          <p className="mt-1 pl-8 text-xs text-gray-500 dark:text-gray-400">{item.hint}</p>
+                          <p className="mt-1 pl-8 text-xs text-gray-500 dark:text-gray-400">
+                            {item.hint}
+                          </p>
                         </div>
                       ))}
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className={tab === "models" ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" : "hidden"}>
-                    {/* Chosen from what SmartDoc offers. Empty means the
-                        customer's choice applies — the same shape as the
-                        size limit: blank means the customer's choice, and
-                        the option itself names what that works out to rather
-                        than leaving somebody to go and look. A stage that is
-                        switched on with no model resolvable is refused on
-                        save, with the reason. */}
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      {(
-                        [
-                          ["categorise", "categorise_model_id", "Categorise"],
-                          ["read", "read_model_id", "OCR"],
-                        ] as const
-                      ).map(([purpose, field, label]) => {
-                        const choices = offeredModels;
-                        const inherited =
-                          purpose === "categorise" ? resolvedModels.categorise : resolvedModels.read;
-                        return (
-                          <div key={field}>
-                            <Label htmlFor={field}>{label}</Label>
-                            <select
-                              id={field}
-                              value={form[field]}
-                              onChange={(e) => setForm({ ...form, [field]: e.target.value })}
-                              className="h-9 w-full rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-                            >
-                              <option value="" className="dark:bg-gray-900">
-                                {inherited || "Not Set"}
-                              </option>
-                              {choices.map((m) => (
-                                <option key={m.model_id} value={String(m.model_id)} className="dark:bg-gray-900">
-                                  {m.display_name}
-                                </option>
-                              ))}
-                            </select>
-                            {choices.length === 0 && (
-                              <p className="mt-1.5 text-xs text-warning-600 dark:text-warning-500">
-                                SmartDoc offers no model for this yet.
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
+
+                      </div>
                     </div>
                   </div>
 
@@ -911,12 +1155,15 @@ export default function Projects() {
                       alone follows the customer, so the usual case is to
                       open this and change nothing. */}
                   <div className={tab === "notifications" ? "rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" : "hidden"}>
-                    <div className="space-y-5">
+                    {/* Admin beside Viewer, not above it: two short lists
+                        stacked pushed the Save button off the bottom. */}
+                    <div className="grid gap-x-8 gap-y-5 lg:grid-cols-2">
                       <div>
                         <p className="mb-2 text-sm font-medium text-gray-800 dark:text-white/90">
                           Admin
                         </p>
                         <NotificationAreasCard
+                          ref={workAreasRef}
                           projectId={selectedProject.project_id}
                           surface="work"
                         />
@@ -926,6 +1173,7 @@ export default function Projects() {
                           Viewer
                         </p>
                         <NotificationAreasCard
+                          ref={viewerAreasRef}
                           projectId={selectedProject.project_id}
                           surface="viewer"
                         />

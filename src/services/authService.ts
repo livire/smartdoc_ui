@@ -47,6 +47,21 @@ export interface UserProject {
   can_comment?: number | null;
   can_annotate?: number | null;
   can_forward?: number | null;
+  /**
+   * The project itself, joined on by `GET /user_project/user/:id`.
+   *
+   * **Every screen that lists somebody's projects needs the name**, and a
+   * membership row is ids only — which is why the server includes it. Read
+   * it from here rather than fetching the customer's project list beside it:
+   * that second call needs a customer in context, and a screen that has not
+   * got one silently showed "Project 41".
+   */
+  project?: {
+    project_id: number;
+    project_name: string;
+    customer_id?: number;
+    identifier_label?: string | null;
+  } | null;
 }
 
 export interface UserProjectsResponse {
@@ -133,32 +148,17 @@ export const authService = {
    * tokens come back exactly as from `login`, so the caller carries on the
    * same way.
    */
-  /** Send the address-verification email again. */
-  async resendVerification(username: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/send_verification`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username }),
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      throw new Error(body?.message || "Could not send the verification email");
-    }
-  },
-
-  /** Ask for a link to set a new password. Answers the same either way. */
-  async forgotPassword(username: string): Promise<string> {
-    const response = await fetch(`${API_BASE_URL}/forgot_password`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username }),
-    });
-    const body = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(body?.message || "Could not send the email");
-    }
-    return body?.data?.message || "If that account exists, a link is on its way.";
-  },
+  /**
+   * **Emailing a link lives in `passwordLinkService`, not here** (2026-10-13).
+   *
+   * `forgotPassword` and `resendVerification` used to be here and asked
+   * `auth_api` to send Keycloak's own mails. Those mails land on Keycloak's
+   * pages, which know one password policy for the whole realm — so a
+   * customer asking for 12 characters and a symbol got 8 enforced. Both are
+   * now one call to `smartdoc_api`, which signs a link to a SmartDoc page
+   * that does know the customer. The `auth_api` endpoints still exist; this
+   * application no longer uses them.
+   */
 
   async completePassword(username: string, password: string, newPassword: string): Promise<TokenResponse> {
     const response = await fetch(`${API_BASE_URL}/complete_password`, {

@@ -5,6 +5,7 @@ import Toast from "../components/common/Toast";
 import { Modal } from "../components/ui/modal";
 import Button from "../components/ui/button/Button";
 import TextArea from "../components/form/input/TextArea";
+import { useShortName } from "../hooks/useShortName";
 import { useProject } from "../context/ProjectContext";
 import { useCustomer, storedCustomerUrl } from "../context/CustomerContext";
 import { authService } from "../services/authService";
@@ -35,6 +36,8 @@ const ICON_RELEASE = "M16 13v-2H7V8l-5 4 5 4v-3zM20 3h-8v2h8v14h-8v2h8a2 2 0 0 0
 const ICON_CLAIM = "M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 7 7v2a9 9 0 0 0 0-18z";
 
 export default function VerifyBatch() {
+  // Stored usernames carry the customer's prefix; nobody should see it.
+  const short = useShortName();
   const navigate = useNavigate();
   const { assignmentId } = useParams();
   const { project } = useProject();
@@ -1207,7 +1210,7 @@ export default function VerifyBatch() {
                               as one list. It will be written under this name,
                               at whatever time Save happens. */}
                           <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                            {user?.preferred_username || "You"} · {new Date().toLocaleString()}
+                            {short(user?.preferred_username) || "You"} · {new Date().toLocaleString()}
                           </p>
                         </li>
                         ))}
@@ -1228,7 +1231,7 @@ export default function VerifyBatch() {
                                 the verifier's name against a page that came
                                 back is the rejection. */}
                             <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                              {c.created_by_username || "Unknown"}
+                              {short(c.created_by_username) || "Unknown"}
                               {c.created_at ? ` · ${new Date(c.created_at).toLocaleString()}` : ""}
                             </p>
                           </li>
@@ -1458,7 +1461,7 @@ export default function VerifyBatch() {
                   >
                     <p className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                       <span className="font-medium text-gray-700 dark:text-gray-300">
-                        {c.created_by_username || "Unknown"}
+                        {short(c.created_by_username) || "Unknown"}
                       </span>
                       <span>{c.created_at ? new Date(c.created_at).toLocaleString() : ""}</span>
                     </p>
@@ -1484,7 +1487,7 @@ export default function VerifyBatch() {
                   >
                     <p className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                       <span className="font-medium text-gray-700 dark:text-gray-300">
-                        {stage.assigned_to_username || "Unassigned"}
+                        {short(stage.assigned_to_username) || "Unassigned"}
                       </span>
                       <span>
                         {stage.completed_at || stage.started_at

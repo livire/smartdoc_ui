@@ -59,6 +59,20 @@ const NO_ACCESS: Membership = {
 interface MembershipContextValue {
   membership: Membership;
   account: Account;
+  /**
+   * How many places this person can go: their projects, plus the customer's
+   * own screens if they administer it.
+   *
+   * **The menu offers a choice only when there is one to make.** Somebody on
+   * one project who does not administer the customer has a single
+   * destination, so a project selector at the top of the menu is a control
+   * that can only reselect what is already open. A customer administrator on
+   * one project has two, and needs it.
+   *
+   * `null` until it is known — the sidebar waits rather than drawing a
+   * selector and taking it away a frame later.
+   */
+  destinations: number | null;
   loading: boolean;
   // The customer-level answer arrives without a project, so it is worth
   // knowing separately: the sidebar has to wait for it before deciding what
@@ -69,6 +83,7 @@ interface MembershipContextValue {
 const MembershipContext = createContext<MembershipContextValue>({
   membership: NO_ACCESS,
   account: NO_ACCOUNT,
+  destinations: null,
   loading: true,
   accountLoading: true,
 });
@@ -102,6 +117,10 @@ export function MembershipProvider({ children }: { children: ReactNode }) {
     return NO_ACCOUNT;
   });
   const [accountLoading, setAccountLoading] = useState(true);
+  // How many projects this person is on. Asked once per session; the answer
+  // only changes when somebody is added to a project, which is a different
+  // screen and a reload away.
+  const [projectCount, setProjectCount] = useState<number | null>(null);
 
   // Who the caller is across the customer. No project in the question, and
   // none needed in the answer.
@@ -131,8 +150,19 @@ export function MembershipProvider({ children }: { children: ReactNode }) {
         if (!response.ok) throw new Error("failed to resolve the account");
         const body = await response.json();
         if (!cancelled) setAccount(body.data || NO_ACCOUNT);
+
+        // How many projects they are on, for the same decision. A system
+        // administrator has no `user` row and therefore no memberships.
+        const id = body.data?.user_id;
+        if (id) {
+          const mine = await authService.getUserProjects(id, token).catch(() => null);
+          if (!cancelled) setProjectCount(mine?.data?.length ?? 0);
+        } else if (!cancelled) {
+          setProjectCount(0);
+        }
       } catch {
         if (!cancelled) setAccount(NO_ACCOUNT);
+        if (!cancelled) setProjectCount(null);
       } finally {
         if (!cancelled) setAccountLoading(false);
       }
@@ -182,8 +212,12 @@ export function MembershipProvider({ children }: { children: ReactNode }) {
     };
   }, [user?.user_id, project?.project_id]);
 
+  // Their projects plus, for an administrator, the customer's own screens.
+  const destinations =
+    projectCount === null ? null : projectCount + (account.is_customer_admin ? 1 : 0);
+
   return (
-    <MembershipContext.Provider value={{ membership, account, loading, accountLoading }}>
+    <MembershipContext.Provider value={{ membership, account, destinations, loading, accountLoading }}>
       {children}
     </MembershipContext.Provider>
   );

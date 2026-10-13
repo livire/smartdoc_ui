@@ -6,8 +6,9 @@ import LogoPlaceholder from "../common/LogoPlaceholder";
 import CollapsiblePanel from "../common/Panel";
 import { authService } from "../../services/authService";
 import { customerService } from "../../services/customerService";
-import { modelCatalogueService, CatalogueModel } from "../../services/modelCatalogueService";
 import { projectSettingService } from "../../services/projectSettingService";
+import CustomerOwnModels from "./CustomerOwnModels";
+import CustomerOwnSmtp, { CustomerOwnSmtpHandle } from "./CustomerOwnSmtp";
 
 // Logos are stored as data URLs in the database, so they are shrunk here
 // first. Wide rather than square: a logo is a strip, not a portrait. The two
@@ -177,7 +178,9 @@ function BrandingCard({
   // Told whenever saving or loading changes, so the page's button can
   // refuse a press and say which of the two is happening.
   onStatusChange,
-  section = null,
+  section,
+  showOwnModels = true,
+  showOwnSmtp = true,
 }: {
   customerId: number;
   // A hint for the placeholder only; the label itself is never pre-filled
@@ -193,7 +196,22 @@ function BrandingCard({
    * so splitting them into four components would mean four saves or a lot of
    * lifted state.
    */
-  section?: "branding" | "models" | "password" | "misc" | null;
+  section?: "branding" | "models" | "email" | "password" | "misc" | null;
+  /**
+   * Whether to draw the list of models this customer can use.
+   *
+   * Off on `/sys`, where the allowlist above it already lists them — two
+   * lists of the same models, one of them read-only, is the same answer
+   * twice.
+   */
+  showOwnModels?: boolean;
+  /**
+   * Whether to draw this customer's own email server.
+   *
+   * Off on `/sys`, which draws it itself on its own tab — mounted twice it
+   * would fetch the account twice, once into a hidden div.
+   */
+  showOwnSmtp?: boolean;
 }, ref: React.Ref<BrandingCardHandle>) {
   const [label, setLabel] = useState("");
   // The house limit for every project this customer has, unless a project
@@ -216,9 +234,17 @@ function BrandingCard({
   const [pwCapital, setPwCapital] = useState(false);
   // The models every project here uses unless it says otherwise. Chosen
   // from what SmartDoc offers; the keys are SmartDoc's and never seen.
-  const [categoriseModelId, setCategoriseModelId] = useState("");
-  const [readModelId, setReadModelId] = useState("");
-  const [offered, setOffered] = useState<CatalogueModel[]>([]);
+  // Whether SmartDoc has agreed this customer may add models of their own.
+  // Read with the customer rather than passed in: this card is given a
+  // customer id and nothing else.
+  const [canAddModels, setCanAddModels] = useState(false);
+  // The same for their own email server. Read the same way, from the
+  // customer rather than passed in.
+  const [canAddSmtp, setCanAddSmtp] = useState(false);
+  // Which server sends their mail is held by that card until Save, like
+  // every other field here, so this one writes it.
+  const smtpRef = useRef<CustomerOwnSmtpHandle>(null);
+
   const [loginLogo, setLoginLogo] = useState<string | null>(null);
   const [menuLogo, setMenuLogo] = useState<string | null>(null);
   // The same two for a dark screen, both optional.
@@ -251,12 +277,16 @@ function BrandingCard({
     (async () => {
       setLoading(true);
       try {
-        const [settings, models] = await Promise.all([
+        const [settings, customer] = await Promise.all([
           customerService.getSettings(customerId),
-          modelCatalogueService.offered().catch(() => []),
+          authService
+            .ensureValidToken()
+            .then((token) => customerService.getById(customerId, token))
+            .catch(() => null),
         ]);
         if (cancelled) return;
-        setOffered(models);
+        setCanAddModels(customer?.can_add_models === 1);
+        setCanAddSmtp(customer?.can_add_smtp === 1);
         // Empty when nothing has been set, with the customer's name as a
         // hint only. Pre-filling it would copy that name into every
         // customer's label on the first save, and leave it stale if the
@@ -268,10 +298,6 @@ function BrandingCard({
         setPwDigit(settings?.password_needs_digit === 1);
         setPwSymbol(settings?.password_needs_symbol === 1);
         setPwCapital(settings?.password_needs_capital === 1);
-        setCategoriseModelId(
-          settings?.categorise_model_id != null ? String(settings.categorise_model_id) : "",
-        );
-        setReadModelId(settings?.read_model_id != null ? String(settings.read_model_id) : "");
         setLoginLogo(settings?.login_logo ?? null);
         setMenuLogo(settings?.menu_logo ?? null);
         setLoginLogoDark(settings?.login_logo_dark ?? null);
@@ -304,12 +330,18 @@ function BrandingCard({
           password_needs_digit: (pwDigit ? 1 : 0) as 0 | 1,
           password_needs_symbol: (pwSymbol ? 1 : 0) as 0 | 1,
           password_needs_capital: (pwCapital ? 1 : 0) as 0 | 1,
-          categorise_model_id: categoriseModelId ? Number(categoriseModelId) : null,
-          read_model_id: readModelId ? Number(readModelId) : null,
         },
         token,
       );
-      onToast({ message: "Settings saved", type: "success" });
+      // Which server sends their mail, if they changed it. Its own call
+      // because it is a different table and a different permission — the
+      // customer decides this one, and `customer_setting` is not where it
+      // lives.
+      await smtpRef.current?.save();
+
+      // **No success message here.** The page owns the Save and says so
+      // once; this said it too, so every save showed two toasts. Failures
+      // still report from here — they name which part failed.
     } catch (err) {
       onToast({
         message: err instanceof Error ? err.message : "Failed to save",
@@ -435,47 +467,33 @@ function BrandingCard({
       {/* Which model reads and which categorises, for every project here
           unless a project chooses its own. */}
       {panel("models", "AI Models", "customer.models", false, (<>
-      {/* Side by side at their own width, not one per half of the screen:
-          two short dropdowns spread across a wide column read as two
-          unrelated settings. */}
-      <div className="flex flex-wrap gap-5">
-        {(
-          [
-            ["categorise", categoriseModelId, setCategoriseModelId, "Categorise"],
-            ["read", readModelId, setReadModelId, "OCR"],
-          ] as const
-        ).map(([purpose, value, setValue, modelLabel]) => {
-          // Every offered model, for both: what a model is for is this
-          // choice, not a property of the model.
-          const choices = offered;
-          return (
-            <div key={purpose} className="w-56">
-              <Label htmlFor={`model-${purpose}`}>{modelLabel}</Label>
-              <select
-                id={`model-${purpose}`}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                className="h-9 w-full rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-              >
-                <option value="" className="dark:bg-gray-900">
-                  Not chosen
-                </option>
-                {choices.map((m) => (
-                  <option key={m.model_id} value={String(m.model_id)} className="dark:bg-gray-900">
-                    {m.display_name}
-                  </option>
-                ))}
-              </select>
-              {choices.length === 0 && (
-                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  SmartDoc offers no models yet.
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {/* **No Categorise or OCR default here.**
+          A customer-wide default meant two places could name a model and a
+          project inheriting one had to be kept in step with it — which took
+          a background sync, and still read as a model the project had not
+          chosen. A project now says what it uses, from what this customer
+          is allowed. This tab is what they are allowed, and what they have
+          added. */}
+      {showOwnModels && (
+        <CustomerOwnModels canAdd={canAddModels} customerName={customerName} />
+      )}
       </>))}
+
+      {/* Where this customer's mail goes out through.
+          **Not wrapped in a panel**, unlike every other section here: it
+          draws two cards of its own — which server sends our mail, and our
+          own server at the end — and a panel around them would be a third
+          border around two things that are already separate. */}
+      {showOwnSmtp && (
+        <div className={section && section !== "email" ? "hidden" : ""}>
+          <CustomerOwnSmtp
+            ref={smtpRef}
+            canAdd={canAddSmtp}
+            customerId={customerId}
+            customerName={customerName}
+          />
+        </div>
+      )}
 
       {/* What a password must look like here. Checked by auth_api before
           the password reaches Keycloak — a Keycloak realm has one policy for
