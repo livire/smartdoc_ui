@@ -213,7 +213,7 @@ export default function SystemModels() {
           <Table>
             <TableHeader className="border-b border-gray-100 dark:border-gray-800">
               <TableRow>
-                {["Name", "Model id", "Provider", "Can do", "Key", "Retires", "Offered", ""].map((h, i) => (
+                {["Name", "Model id", "Provider", "OCR", "Categorise", "Key", "Retires", "Offered", ""].map((h, i) => (
                   <TableCell
                     key={h || i}
                     isHeader
@@ -227,13 +227,13 @@ export default function SystemModels() {
             <TableBody className="divide-y divide-gray-100 dark:divide-gray-800">
               {loading ? (
                 <TableRow>
-                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={8}>
+                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={9}>
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : shown.length === 0 ? (
                 <TableRow>
-                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={8}>
+                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={9}>
                     {term !== ""
                       ? "No model matches that."
                       : "No models yet. Add one, give it a key, and customers can choose it."}
@@ -256,14 +256,24 @@ export default function SystemModels() {
                     <TableCell className="whitespace-nowrap px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
                       {m.provider}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                      {[
-                        Number(m.can_read) === 1 && "Read",
-                        Number(m.can_categorise) === 1 && "Categorise",
-                      ]
-                        .filter(Boolean)
-                        .join(", ") || "—"}
-                    </TableCell>
+                    {/* One column per job: a green dot when the model can
+                        do it, a red one when it cannot. */}
+                    {(
+                      [
+                        [Number(m.can_read) === 1, "Reads pages", "Cannot read pages"],
+                        [Number(m.can_categorise) === 1, "Categorises pages", "Cannot categorise"],
+                      ] as const
+                    ).map(([yes, on, off]) => (
+                      <TableCell key={on} className="whitespace-nowrap px-4 py-3 text-sm">
+                        <span
+                          title={yes ? on : off}
+                          aria-label={yes ? on : off}
+                          className={`block size-2.5 rounded-full ${
+                            yes ? "bg-success-500" : "bg-error-500"
+                          }`}
+                        />
+                      </TableCell>
+                    ))}
                     <TableCell className="whitespace-nowrap px-4 py-3 text-sm">
                       {!providerNeedsKey(m.provider) ? (
                         <span className="text-gray-500 dark:text-gray-400">Not needed</span>
