@@ -12,6 +12,7 @@ import BrandingCard, {
   BrandingCardStatus,
 } from "../../components/customer/BrandingCard";
 import CustomerModels, { CustomerModelsHandle } from "./CustomerModels";
+import CustomerSso from "./CustomerSso";
 import CustomerOwnSmtp from "../../components/customer/CustomerOwnSmtp";
 import { smtpService, SmtpAccount, isSmartDocAccount } from "../../services/smtpService";
 
@@ -84,7 +85,15 @@ export default function CustomerPane({
    * the one Save and an edit on another tab is not thrown away.
    */
   const [tab, setTab] = useState<
-    "customer" | "branding" | "models" | "email" | "password" | "misc" | "storage" | "users"
+    | "customer"
+    | "branding"
+    | "models"
+    | "email"
+    | "password"
+    | "misc"
+    | "sso"
+    | "storage"
+    | "users"
   >("customer");
 
   // The tabs whose contents BrandingCard draws.
@@ -95,8 +104,9 @@ export default function CustomerPane({
   const CARD_TABS = ["branding", "password", "misc"];
 
   // The tabs the one Save writes: the customer row, the settings card's
-  // three, and the allowlist. Storage and Users save themselves, so a Save
-  // over them would be a button that does nothing to what is on screen.
+  // three, and the allowlist. Storage, Users and Single sign-on save
+  // themselves, so a Save over them would be a button that does nothing to
+  // what is on screen.
   const SAVE_TABS = ["customer", "branding", "models", "email", "password", "misc"];
 
   // SmartDoc's own email accounts, to choose a sender from. Read once —
@@ -238,6 +248,7 @@ export default function CustomerPane({
           ["email", "SMTP Server"],
           ["password", "Password"],
           ["misc", "Miscellaneous"],
+          ["sso", "Single sign-on"],
           ["storage", "Storage"],
           ["users", `Users${customer.users ? ` (${customer.users})` : ""}`],
         ] as const).map(([key, label]) => (
@@ -523,6 +534,10 @@ export default function CustomerPane({
                 />
               </div>
             )}
+
+            {/* Their company login. Its own Save: it lives in Keycloak, not
+                in the customer's row. */}
+            {tab === "sso" && <CustomerSso customerId={customer.customer_id} onToast={setToast} />}
 
             {/* How it looks — the same card the customer's own settings
                 page shows, so what SmartDoc sets up for them is what they

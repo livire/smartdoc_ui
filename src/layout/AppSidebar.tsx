@@ -282,7 +282,8 @@ const AppSidebar: React.FC = () => {
         }
         if (!customerId || cancelled) return;
 
-        const settings = await customerService.getSettings(customerId);
+        const token = await authService.ensureValidToken();
+        const settings = await customerService.getSettings(customerId, token);
         if (!cancelled) {
           setBranding({
             label: settings?.customer_label ?? null,

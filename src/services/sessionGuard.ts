@@ -5,7 +5,7 @@ import { LOCK_WINDOW_MS, requireReauth } from "./sessionExpiry";
 // password" or "your refresh token has expired", which the calling code
 // already handles. Locking the screen on them would trap someone inside the
 // prompt that is trying to let them out.
-const EXEMPT = ["/user_token", "/refresh_token", "/service_token"];
+const EXEMPT = ["/user_token", "/refresh_token", "/public/customer/"];
 
 const isExempt = (url: string) => EXEMPT.some((path) => url.includes(path));
 

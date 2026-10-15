@@ -74,6 +74,60 @@ export default function SessionExpiredPrompt() {
     authService.sessionExpired();
   };
 
+  // Somebody who signed in with their company login has no SmartDoc
+  // password to type. Their way back is the company login again: the tab
+  // goes there and returns to this page — what is on screen and unsaved is
+  // lost, which the prompt says. Rare: the session is kept alive while the
+  // app is open (`sessionKeeper`).
+  const company = authService.companyAlias();
+  const signInWithCompany = async () => {
+    if (signingIn) return;
+    setSigningIn(true);
+    setError(null);
+    try {
+      await authService.restartCompanySession();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reach the company login");
+      setSigningIn(false);
+    }
+  };
+
+  if (company) {
+    return (
+      <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm">
+        <div className="w-full max-w-md rounded-2xl bg-white p-7 shadow-xl dark:bg-gray-900">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+            Your session has expired
+          </h2>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Sign in again as {short(username)} to carry on. You will come back to this page;
+            anything not yet saved on it will need doing again.
+          </p>
+
+          {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
+
+          <div className="mt-6 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={signOut}
+              className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:text-error-500 dark:text-gray-400"
+            >
+              Sign out
+            </button>
+            <button
+              type="button"
+              onClick={signInWithCompany}
+              disabled={signingIn}
+              className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-brand-300"
+            >
+              {signingIn ? "Signing in…" : "Sign in with your company login"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-sm">
       <form

@@ -277,12 +277,10 @@ function BrandingCard({
     (async () => {
       setLoading(true);
       try {
+        const token = await authService.ensureValidToken();
         const [settings, customer] = await Promise.all([
-          customerService.getSettings(customerId),
-          authService
-            .ensureValidToken()
-            .then((token) => customerService.getById(customerId, token))
-            .catch(() => null),
+          customerService.getSettings(customerId, token),
+          customerService.getById(customerId, token).catch(() => null),
         ]);
         if (cancelled) return;
         setCanAddModels(customer?.can_add_models === 1);

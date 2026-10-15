@@ -108,15 +108,16 @@ export default function CustomerSettings() {
       try {
         const token = await authService.ensureValidToken();
         const [fresh, projects] = await Promise.all([
-          // The stored copy is from sign-in; the limit may have moved since.
-          customerService.getCustomerByUrl(customer.customer_url).catch(() => null),
+          // The stored copy is from sign-in and has no limit in it — the
+          // public answer the sign-in page reads leaves it out.
+          customerService.getById(customer.customer_id, token).catch(() => null),
           userManagementService.getProjectsByCustomer(customer.customer_id, token).catch(() => []),
         ]);
         if (cancelled) return;
-        const row = fresh?.data ?? customer;
+        const row = fresh ?? customer;
         setName(row.customer_name);
         setUrl(row.customer_url);
-        setAllowed(String(row.allowed_projects));
+        setAllowed(row.allowed_projects !== undefined ? String(row.allowed_projects) : "");
         setActive(row.is_active === 1);
         setProjectCount(projects.length);
       } finally {
@@ -130,7 +131,9 @@ export default function CustomerSettings() {
   }, [customer?.customer_id, customer?.customer_name]);
 
   const saveRow = async () => {
-    if (!customer?.customer_id || !name.trim() || !url.trim()) return;
+    // An empty limit means the row could not be read, not "no projects" —
+    // saving then would write 0 and lock the customer out of new projects.
+    if (!customer?.customer_id || !name.trim() || !url.trim() || allowed.trim() === "") return;
     setSavingRow(true);
     try {
       const token = await authService.ensureValidToken();

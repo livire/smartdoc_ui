@@ -100,7 +100,8 @@ export default function ProjectSelection() {
     let cancelled = false;
     (async () => {
       try {
-        const settings = await customerService.getSettings(customer.customer_id);
+        const token = await authService.ensureValidToken();
+        const settings = await customerService.getSettings(customer.customer_id, token);
         if (!cancelled) {
           setBranding({
             label: settings?.customer_label ?? null,

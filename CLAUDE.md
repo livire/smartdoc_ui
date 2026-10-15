@@ -350,6 +350,49 @@ number would let a customer point SmartDoc at anything listening; the server
 refuses private addresses too, and the form says that before they save
 rather than after.
 
+## Single sign-on is a `/sys` tab, and only there
+`pages/System/CustomerSso.tsx`, on `/sys` → a customer → *Single sign-on*
+(2026-10-14). A customer's company login — the email domains, the discovery
+address and client credentials their IT team sends, and an on/off switch —
+held in Keycloak through `smartdoc_api` `/customer/:id/sso`. **Never on the
+customer's own screens**: a domain decides who is sent to which company's
+login, so SmartDoc checks the customer owns it.
+
+**Its own Save**, like Storage — it is not in the customer's row. The client
+secret is a password field that is never filled back in; empty keeps the
+stored one. The return address at the top is what their IT team enters, and
+comes from the server so there is one copy of how it is built.
+
+## Two ways in, one session
+**The password form is still the main door** (decided 2026-10-15: people
+should not see Keycloak's pages). A customer whose single sign-on is on also
+gets *Sign in with your company login* above it — `company_login` from the
+public customer route. It sends the tab straight to their company's login
+(`services/companyLogin.ts`, `kc_idp_hint`), so Keycloak shows nothing of
+its own, and back to `/auth/callback`. **A redirect, not a popup**: a popup
+could not tell it had been closed once a login page cut it off from the
+opener, and the button waited for ever.
+
+**A company-login session is marked** by `smartdoc.company_login` in
+localStorage (its alias), and three things go another way for it:
+refreshing (Keycloak directly — `auth_api` refreshes for the other client),
+signing out (the Keycloak session is ended too, or the next person at the
+machine goes straight in), and the session-expired prompt (the company
+login again, coming back to the same page; the same Keycloak `sub` or it
+is refused).
+Everything else reads the tokens from the same keys as before.
+
+**On the way back, `/user/me` must say this customer.** A password sign-in
+proves it with the username prefix; a company login has none. The customer
+travels in Keycloak's `state` and becomes the stored customer only then.
+
+**`/auth/callback` is drawn by `main.tsx` without the app.** The app's
+start-up acts on whatever session was there before — refreshes it, locks
+it — while that page is replacing it.
+
+`VITE_KEYCLOAK_AUTHORITY` and `VITE_KEYCLOAK_CLIENT_ID` are required; the
+app throws on load without them.
+
 ## Setting a password from an emailed link
 `pages/AuthPages/SetPassword.tsx` at `/:customerUrl/set-password`, **outside
 `ProtectedRoute`** — the person cannot sign in yet, which is what the link is

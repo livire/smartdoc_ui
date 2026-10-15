@@ -108,8 +108,34 @@ export default function SignInForm({
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordAgain, setNewPasswordAgain] = useState("");
   const [settingPassword, setSettingPassword] = useState(false);
+  // Whether this customer's people may sign in with their company login:
+  // its alias when it is set up and on (the button), "unknown" when that
+  // could not be checked (a line saying so), null otherwise (no button).
+  const [companyAlias, setCompanyAlias] = useState<string | null>(null);
+  const [companyUnknown, setCompanyUnknown] = useState(false);
+  const [companySigningIn, setCompanySigningIn] = useState(false);
+
+  /**
+   * The company-login button: the tab goes to the customer's own login and
+   * comes back signed in (`authService.finishCompanySignIn`). The customer
+   * travels with it — the form's own one when it is for another customer
+   * than the open session's — and is only kept if the person turns out to
+   * be theirs.
+   */
+  const signInWithCompany = async () => {
+    if (!companyAlias || !customer?.customer_id) return;
+    setFormError(null);
+    setCompanySigningIn(true);
+    try {
+      await authService.startCompanySignIn(companyAlias, customer);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Could not reach the company login");
+      setCompanySigningIn(false);
+    }
+  };
+
   // The customer's own logo and name for itself, when they have set them.
-  // Read with the service token, since nobody has one of their own yet.
+  // From the public answer, since nobody is signed in yet.
   const [branding, setBranding] = useState<{
     label: string | null;
     logo: string | null;
@@ -138,20 +164,38 @@ export default function SignInForm({
   const { theme } = useTheme();
   const shownLogo = theme === "dark" ? branding.logoDark || branding.logo : branding.logo;
 
+  // Nobody is signed in here, so this reads the public answer — the same
+  // cached request the page made to find the customer — and keeps its logos
+  // and password rules where `passwordRules` above and the later screens
+  // look for them.
   useEffect(() => {
-    if (!customer?.customer_id) return;
+    if (!customer?.customer_id || !customer.customer_url) return;
     let cancelled = false;
 
     (async () => {
       try {
-        const settings = await customerService.getSettings(customer.customer_id);
-        if (!cancelled) {
-          setBranding({
-            label: settings?.customer_label ?? null,
-            logo: settings?.login_logo ?? settings?.menu_logo ?? null,
-            logoDark: settings?.login_logo_dark ?? settings?.menu_logo_dark ?? null,
-          });
-        }
+        const { data } = await customerService.getCustomerByUrl(customer.customer_url);
+        if (cancelled) return;
+        const current = customerService.readCachedSettings(customer.customer_id);
+        customerService.writeCachedSettings(customer.customer_id, {
+          ...current,
+          customer_label: data.customer_label,
+          login_logo: data.login_logo,
+          menu_logo: data.menu_logo,
+          login_logo_dark: data.login_logo_dark,
+          menu_logo_dark: data.menu_logo_dark,
+          ...(data.password_min_length !== null ? { password_min_length: data.password_min_length } : {}),
+          ...(data.password_needs_digit !== null ? { password_needs_digit: data.password_needs_digit } : {}),
+          ...(data.password_needs_symbol !== null ? { password_needs_symbol: data.password_needs_symbol } : {}),
+          ...(data.password_needs_capital !== null ? { password_needs_capital: data.password_needs_capital } : {}),
+        });
+        setBranding({
+          label: data.customer_label,
+          logo: data.login_logo ?? data.menu_logo,
+          logoDark: data.login_logo_dark ?? data.menu_logo_dark,
+        });
+        setCompanyAlias(data.company_login);
+        setCompanyUnknown(data.company_login_unknown);
       } catch {
         // The customer's name on its own is a fine sign-in page.
       }
@@ -160,7 +204,7 @@ export default function SignInForm({
     return () => {
       cancelled = true;
     };
-  }, [customer?.customer_id]);
+  }, [customer?.customer_id, customer?.customer_url]);
   return (
     <div className="flex flex-col flex-1">
       <div className="flex flex-col justify-center flex-1 w-full max-w-md mx-auto">
@@ -417,6 +461,36 @@ export default function SignInForm({
               </div>
               ) : (
               <div className="space-y-6">
+                {/* **Above the form, because it is how most of this
+                    customer's people get in.** The form stays for anybody
+                    on a personal address, who has a SmartDoc password. */}
+                {companyAlias && (
+                  <div className="space-y-4">
+                    <Button
+                      type="button"
+                      className="w-full"
+                      size="sm"
+                      disabled={companySigningIn || isLoading}
+                      onClick={signInWithCompany}
+                    >
+                      {companySigningIn ? "Signing in..." : "Sign in with your company login"}
+                    </Button>
+                    <div className="flex items-center gap-3 text-xs text-gray-400">
+                      <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+                      or with a SmartDoc password
+                      <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+                    </div>
+                  </div>
+                )}
+                {/* Said rather than hidden: somebody who signs in with their
+                    company login would otherwise stare at a password form
+                    and wonder which password. */}
+                {companyUnknown && (
+                  <p className="rounded-lg bg-warning-50 p-3 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-400">
+                    Signing in with your company login is not available right now. If you have a
+                    SmartDoc password you can use it below; otherwise try again in a few minutes.
+                  </p>
+                )}
                 <div>
                   <Label>
                     Username <span className="text-error-500">*</span>{" "}

@@ -354,15 +354,17 @@ export default function Projects() {
       const [projectResult, storageResult, customerResult, customerSettings, models] = await Promise.all([
         userManagementService.getProjectsByCustomer(customer.customer_id, token),
         storageService.getStoragesByCustomer(customer.customer_id, token),
-        customerService.getCustomerByUrl(customer.customer_url).catch(() => null),
-        customerService.getSettings(customer.customer_id).catch(() => null),
+        // The full row, with the person's own token: the public answer the
+        // sign-in page reads has no project limit in it.
+        customerService.getById(customer.customer_id, token).catch(() => null),
+        customerService.getSettings(customer.customer_id, token).catch(() => null),
         modelCatalogueService.offered().catch(() => []),
       ]);
       setProjects(projectResult);
       setStorages(storageResult);
       setCustomerLimit(customerSettings?.max_file_mb ?? null);
       setOfferedModels(models);
-      setAllowedProjects(customerResult?.data?.allowed_projects ?? customer.allowed_projects ?? null);
+      setAllowedProjects(customerResult?.allowed_projects ?? customer.allowed_projects ?? null);
       setSelectedId((prev) => prev ?? (projectResult.length > 0 ? projectResult[0].project_id : null));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load projects");

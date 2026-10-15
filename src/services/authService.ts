@@ -1,5 +1,13 @@
 import { requireReauth } from "./sessionExpiry";
 import { forgetAll } from "./cache";
+import { companyLogin } from "./companyLogin";
+
+/**
+ * Set while somebody is signed in through their company login, to its
+ * alias (`customer-55`). It decides how the session is refreshed, renewed
+ * and ended — see `companyLogin.ts`. Absent for a password session.
+ */
+const COMPANY_LOGIN = "smartdoc.company_login";
 
 const API_BASE_URL = import.meta.env.VITE_AUTH_API_URL;
 const API_URL = import.meta.env.VITE_API_URL;
@@ -99,6 +107,18 @@ export class EmailVerificationRequiredError extends Error {
 
 export const authService = {
   async login(credentials: LoginRequest): Promise<TokenResponse> {
+    // Whatever session this replaces, it is no longer a system one. Only
+    // signing out used to clear the mark, so a /sys session that timed out
+    // sent the next customer sign-in to /sys. SystemSignIn sets it again
+    // once /user/me has confirmed a system administrator.
+    try {
+      localStorage.removeItem("smartdoc.system_session");
+      // A password session from here on, whatever the last one was.
+      localStorage.removeItem(COMPANY_LOGIN);
+    } catch {
+      // Storage refused: nothing was there to clear.
+    }
+
     const response = await fetch(`${API_BASE_URL}/user_token`, {
       method: "POST",
       headers: {
@@ -219,6 +239,15 @@ export const authService = {
       throw new Error("No refresh token available");
     }
 
+    // A company-login session is refreshed with Keycloak directly: its
+    // tokens belong to the browser client, and auth_api refreshes for the
+    // other one.
+    if (this.companyAlias()) {
+      const fresh = await companyLogin.refresh(refreshToken);
+      this.saveTokens(fresh.access_token, fresh.refresh_token, fresh.token_expiry);
+      return { data: { ...fresh, token_type: "user" } };
+    }
+
     const response = await fetch(`${API_BASE_URL}/refresh_token`, {
       method: "POST",
       headers: {
@@ -305,6 +334,115 @@ export const authService = {
     localStorage.setItem("user", JSON.stringify(user));
   },
 
+  /** The company login this session came through, or null for a password one. */
+  companyAlias(): string | null {
+    try {
+      return localStorage.getItem(COMPANY_LOGIN);
+    } catch {
+      return null;
+    }
+  },
+
+  /** Keep a company-login session, with what it needs to refresh and end itself. */
+  saveCompanySession(
+    tokens: { access_token: string; refresh_token: string; token_expiry: number },
+    alias: string,
+  ) {
+    this.saveTokens(tokens.access_token, tokens.refresh_token, tokens.token_expiry);
+    localStorage.setItem(COMPANY_LOGIN, alias);
+  },
+
+  /**
+   * The company-login button: send the tab to the customer's own login.
+   * `customer` is the customer whose page it is; the way back checks the
+   * person is theirs (`finishCompanySignIn`).
+   */
+  async startCompanySignIn(
+    alias: string,
+    customer: { customer_id: number; customer_name: string; customer_url: string; is_active: number },
+  ): Promise<void> {
+    await companyLogin.start({
+      alias,
+      customer: {
+        customer_id: customer.customer_id,
+        customer_name: customer.customer_name,
+        customer_url: customer.customer_url,
+        is_active: customer.is_active,
+      },
+      returnTo: `/${customer.customer_url}`,
+    });
+  },
+
+  /**
+   * The session-expired prompt for somebody who has no SmartDoc password:
+   * the company login again, coming back to this same page.
+   *
+   * **The same person or nothing** — the way back refuses a different
+   * Keycloak id. A colleague signed in to Microsoft on the same computer
+   * would otherwise land in this person's work.
+   */
+  async restartCompanySession(): Promise<void> {
+    const alias = this.companyAlias();
+    const sub = this.getStoredUser()?.sub;
+    if (!alias || !sub) throw new Error("No signed-in user to re-authenticate");
+    await companyLogin.start({
+      alias,
+      sameAs: sub,
+      returnTo: `${window.location.pathname}${window.location.search}`,
+    });
+  },
+
+  /**
+   * On `/auth/callback`: keep the session, check who it is, and say where to
+   * go. Throws with words to show when the person may not have it — and
+   * then nothing of the session is left behind.
+   */
+  async finishCompanySignIn(): Promise<string> {
+    const { tokens, trip } = await companyLogin.finish();
+
+    // Signing back in after the session expired: only the same person.
+    if (trip.sameAs) {
+      if (tokens.sub !== trip.sameAs) {
+        void companyLogin.endSession(tokens.refresh_token);
+        throw new Error(
+          "That is a different account. Sign in as the person whose work was on screen, or sign out.",
+        );
+      }
+      this.saveCompanySession(tokens, trip.alias);
+      return trip.returnTo;
+    }
+
+    // Signing in. A new day's work, as with a password — see AuthContext's
+    // `login` — and whatever session this replaces is not a system one.
+    try {
+      localStorage.removeItem("selected_project");
+      sessionStorage.removeItem("projects_checked");
+      localStorage.removeItem("smartdoc.system_session");
+    } catch {
+      // A browser refusing storage asks anyway.
+    }
+    this.saveCompanySession(tokens, trip.alias);
+
+    // **This customer's person, or nobody.** A password sign-in proves it
+    // with the customer's prefix on the username; the company login has
+    // none. Keycloak only attaches a company login to accounts on that
+    // customer's domains, but SmartDoc's own record decides, as it does for
+    // every request after this one.
+    const me = await this.getMe(tokens.access_token);
+    if (!trip.customer || !me.user_id || Number(me.customer_id) !== Number(trip.customer.customer_id)) {
+      this.logout();
+      throw new Error(
+        me.user_id
+          ? "Your account belongs to a different organisation in SmartDoc. Sign in at your own organisation's address."
+          : "Your company login worked, but there is no SmartDoc account for you here. Ask your administrator to add you.",
+      );
+    }
+
+    this.saveUser((await this.getUserInfo(tokens.access_token)).data);
+    localStorage.setItem("customer_data", JSON.stringify(trip.customer));
+    return trip.returnTo;
+  },
+
   /**
    * Sign in again as the same person, without disturbing anything else.
    *
@@ -371,6 +509,14 @@ export const authService = {
   },
 
   logout() {
+    // A company-login session is ended in Keycloak too, or the next person
+    // to press the company button at this computer goes straight in as this
+    // one. Not awaited: everything below happens whatever Keycloak says.
+    const alias = this.companyAlias();
+    const refresh = this.getStoredRefreshToken();
+    if (alias && refresh) void companyLogin.endSession(refresh);
+    localStorage.removeItem(COMPANY_LOGIN);
+
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("user");

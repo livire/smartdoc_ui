@@ -1,12 +1,14 @@
-import { cached, SHORT, FOREVER, forget } from "./cache";
+import { cached, FOREVER, forget } from "./cache";
 const API_BASE_URL = import.meta.env.VITE_API_URL;
-const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL;
 
 export interface CustomerDetails {
   customer_id: number;
   customer_name: string;
   is_active: number;
-  allowed_projects: number;
+  // Not in the public answer the sign-in page reads (`getCustomerByUrl`), so
+  // a customer stored at sign-in has none of the fields below. A screen that
+  // needs one reads the row with `getById` and the person's own token.
+  allowed_projects?: number;
   /** Whether SmartDoc has agreed this customer may add AI models. */
   can_add_models?: 0 | 1;
   /**
@@ -42,68 +44,51 @@ export interface CustomerSummary extends CustomerDetails {
   workers: number;
 }
 
-export interface CustomerResponse {
-  data: CustomerDetails;
+/** How a customer's SmartDoc looks. Null when not set. */
+export interface CustomerBranding {
+  customer_label: string | null;
+  login_logo: string | null;
+  menu_logo: string | null;
+  // The same marks for a dark screen. Null falls back to the light ones.
+  login_logo_dark: string | null;
+  menu_logo_dark: string | null;
 }
 
-export interface ServiceTokenResponse {
-  data: {
-    access_token: string;
-    token_expiry: number;
-    token_type: string;
+/**
+ * What anybody may see about a customer, signed in or not. The password
+ * rules are here because the sign-in form shows them before anybody types;
+ * null means the customer has not set them.
+ */
+export type PublicCustomer = Pick<
+  CustomerDetails,
+  "customer_id" | "customer_name" | "customer_url" | "is_active"
+> &
+  CustomerBranding & {
+    password_min_length: number | null;
+    password_needs_digit: 0 | 1 | null;
+    password_needs_symbol: 0 | 1 | null;
+    password_needs_capital: 0 | 1 | null;
+    /** Their company login's alias when single sign-on is on, else null. */
+    company_login: string | null;
+    /** True when whether they have one could not be checked just now. */
+    company_login_unknown: boolean;
   };
-}
 
-let cachedServiceToken: string | null = null;
-let serviceTokenExpiry: number | null = null;
+export interface CustomerResponse {
+  data: PublicCustomer;
+}
 
 export const customerService = {
   /**
-   * The service token the sign-in page uses before anybody has one of their
-   * own.
+   * One customer, by the url they sign in at: name, active, and logos.
    *
-   * Two caches, and they do different jobs. The expiry below is what stops
-   * us asking again for a token that is still good. `cached` is what stops
-   * two callers starting at the same moment from each making a request —
-   * the old code held only the value, so both missed and both fetched, and
-   * each paid a CORS preflight on top.
-   */
-  async getServiceToken(): Promise<string> {
-    // Return cached token if still valid
-    if (cachedServiceToken && serviceTokenExpiry && Date.now() < serviceTokenExpiry) {
-      return cachedServiceToken;
-    }
-
-    return cached("service_token", SHORT, async () => {
-      const response = await fetch(`${AUTH_API_URL}/service_token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to get service token");
-      }
-
-      const data: ServiceTokenResponse = await response.json();
-      cachedServiceToken = data.data.access_token;
-      serviceTokenExpiry = data.data.token_expiry;
-
-      // The token is now held by expiry above, so the shared promise has
-      // done its job and should not outlive the token it carries.
-      forget("service_token");
-      return cachedServiceToken;
-    });
-  },
-
-  /**
-   * One customer, by the url they sign in at.
+   * **No token** — `smartdoc_api`'s `GET /public/customer/:url`. The sign-in
+   * page needs this before anybody has signed in. It used to fetch
+   * `auth_api`'s service token for it, which handed that token to every
+   * browser (`known-issues.md`, 2026-10-14).
    *
-   * Cached for the life of the tab: four screens ask for it — the sign-in
-   * page, the sidebar, Projects and Customer Settings — and a customer's
-   * row does not change while somebody is looking at it. Customer Settings
-   * clears it after a save, which is the one place it can change.
+   * Cached for the life of the tab: the sign-in page, its form and the
+   * sidebar all ask, and Customer Settings clears it after a save.
    */
   async getCustomerByUrl(customerUrl: string): Promise<CustomerResponse> {
     return cached(`customer:${customerUrl}`, FOREVER, () =>
@@ -119,17 +104,8 @@ export const customerService = {
   async fetchCustomerByUrl(
     customerUrl: string
   ): Promise<CustomerResponse> {
-    const token = await this.getServiceToken();
-
     const response = await fetch(
-      `${API_BASE_URL}/customer/url/${customerUrl}`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      }
+      `${API_BASE_URL}/public/customer/${encodeURIComponent(customerUrl)}`
     );
 
     if (!response.ok) {
@@ -152,8 +128,7 @@ export const customerService = {
    * Every customer in the system.
    *
    * Only somebody who runs SmartDoc may ask — the API refuses everyone else
-   * — so this takes their own token rather than the service token the
-   * sign-in page uses.
+   * — so this takes their own token.
    */
   async getAll(accessToken: string): Promise<CustomerSummary[]> {
     const response = await fetch(`${API_BASE_URL}/customer/summary`, {
@@ -235,13 +210,27 @@ export const customerService = {
     }
   },
 
-  validateCustomer(customer: CustomerDetails): boolean {
+  validateCustomer(customer: Pick<CustomerDetails, "is_active">): boolean {
     return customer.is_active === 1;
   },
 
+  /**
+   * The customer to keep for the session, without the logos. Stored in
+   * localStorage, where a logo is tens of kilobytes; screens get the logos
+   * from `getCustomerByUrl` or `getSettings`.
+   */
+  withoutBranding(customer: PublicCustomer): CustomerDetails {
+    return {
+      customer_id: customer.customer_id,
+      customer_name: customer.customer_name,
+      customer_url: customer.customer_url,
+      is_active: customer.is_active,
+    };
+  },
+
   // Kept between visits: a logo is a data URL of tens of kilobytes, and
-  // fetching it on every screen that shows it meant a service token, a
-  // request, and a visible blank while both happened. Stored per customer,
+  // fetching it on every screen that shows it meant a request and a
+  // visible blank while it happened. Stored per customer,
   // so switching customers cannot show the wrong one.
   cacheKey(customerId: number) {
     return `smartdoc.customer_settings.${customerId}`;
@@ -296,9 +285,6 @@ export const customerService = {
     }
   },
 
-  // How this customer's SmartDoc looks: the label and the two logos.
-  // Read with the service token, because the sign-in page needs it before
-  // anybody has one of their own.
   /**
    * One customer's row — the name, the limits, and whether SmartDoc has
    * agreed they may add AI models.
@@ -317,7 +303,12 @@ export const customerService = {
     return body.data ?? null;
   },
 
-  async getSettings(customerId: number): Promise<{
+  /**
+   * Everything in `customer_setting` — logos, limits, password rules, the
+   * idle timeout, AI models. **Signed-in screens only**: it takes the
+   * person's own token. Before sign-in, `getCustomerByUrl` has the logos.
+   */
+  async getSettings(customerId: number, accessToken: string): Promise<{
     customer_label: string | null;
     login_logo: string | null;
     menu_logo: string | null;
@@ -336,12 +327,10 @@ export const customerService = {
     categorise_model_id?: number | null;
     read_model_id?: number | null;
   } | null> {
-    const token = await this.getServiceToken();
-
     const response = await fetch(`${API_BASE_URL}/customer_setting/customer/${customerId}`, {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
     });

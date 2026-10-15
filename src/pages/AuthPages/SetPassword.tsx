@@ -93,11 +93,9 @@ export default function SetPassword() {
     let alive = true;
     customerService
       .getCustomerByUrl(customerUrl)
-      .then(async (response) => {
+      .then((response) => {
         const row = response?.data;
-        if (!alive || !row?.customer_id) return;
-        const settings = await customerService.getSettings(Number(row.customer_id));
-        if (alive) setLogo(settings?.login_logo || null);
+        if (alive && row?.customer_id) setLogo(row.login_logo || null);
       })
       .catch(() => {
         // A missing logo is not worth a message on this page.
@@ -126,7 +124,7 @@ export default function SetPassword() {
       // is only for reading.
       try {
         const row = await customerService.getCustomerByUrl(done.customer_url);
-        if (row?.data) setCustomer(row.data);
+        if (row?.data) setCustomer(customerService.withoutBranding(row.data));
         await login(done.username, password);
         navigate(`/${done.customer_url}`, { replace: true });
         return;

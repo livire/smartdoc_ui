@@ -107,12 +107,12 @@ export default function SignInWithCustomer() {
           // Not stored: storing it would switch the whole application to a
           // customer nobody has signed in to. The page reads what it needs
           // from `customerData` and asks for a password.
-          setOtherCustomer(customerData);
+          setOtherCustomer(customerService.withoutBranding(customerData));
           setValidCustomer(true);
           return;
         }
 
-        setCustomer(customerData);
+        setCustomer(customerService.withoutBranding(customerData));
         setValidCustomer(true);
       } catch (err) {
         if (isMounted) {
