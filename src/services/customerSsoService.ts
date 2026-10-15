@@ -64,6 +64,20 @@ export const customerSsoService = {
     return answer(response, "Could not save the single sign-on settings");
   },
 
+  /**
+   * Whether single sign-on is on for a customer, and its domains — nothing
+   * else. Readable by that customer's administrators, for the invite
+   * warning on the Users screen.
+   */
+  async domains(customerId: number): Promise<{ enabled: boolean; domains: string[] }> {
+    const response = await fetch(`${API_URL}/customer/${customerId}/sso/domains`, {
+      headers: await headers(),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.message || "Could not read the single sign-on domains");
+    return body.data;
+  },
+
   async remove(customerId: number): Promise<CustomerSso> {
     const response = await fetch(`${API_URL}/customer/${customerId}/sso`, {
       method: "DELETE",

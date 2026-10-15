@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { customerSsoService } from "../services/customerSsoService";
 import PageMeta from "../components/common/PageMeta";
 import Toast from "../components/common/Toast";
 import { Modal } from "../components/ui/modal";
@@ -185,6 +186,28 @@ export default function Users({
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [newUser, setNewUser] = useState(emptyNewUser);
   const [creatingUser, setCreatingUser] = useState(false);
+  // This customer's single sign-on domains, while it is on — read when the
+  // Add dialog opens, for the warning under the email field. Null when it is
+  // off, or could not be read: then there is nothing to warn about.
+  const [ssoDomains, setSsoDomains] = useState<string[] | null>(null);
+  useEffect(() => {
+    const id = customerId ?? contextCustomer?.customer_id;
+    if (!isAddUserOpen || !id) return;
+    let cancelled = false;
+    customerSsoService
+      .domains(Number(id))
+      .then((answer) => {
+        if (!cancelled) setSsoDomains(answer.enabled ? answer.domains : null);
+      })
+      .catch(() => {
+        // A warning that cannot be worked out is simply not shown; the
+        // invitation itself does not depend on it.
+        if (!cancelled) setSsoDomains(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAddUserOpen, customerId, contextCustomer?.customer_id]);
   // Which person's verification link is being sent, so only their own mark
   // reads "Sending...".
   const [resendingFor, setResendingFor] = useState<string | null>(null);
@@ -948,6 +971,21 @@ export default function Users({
               value={newUser.email}
               onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
             />
+            {/* A warning, not a refusal: somebody on a personal address is
+                allowed, and signs in with a SmartDoc password. It is only
+                rarely what the administrator meant, so it is said here,
+                before the invitation goes. */}
+            {(() => {
+              const domain = newUser.email.trim().toLowerCase().split("@")[1];
+              if (!ssoDomains || !domain || ssoDomains.includes(domain)) return null;
+              return (
+                <p className="mt-1.5 text-xs text-warning-600 dark:text-warning-500">
+                  This customer signs in with their company login, which covers{" "}
+                  {ssoDomains.join(", ")}. This address is not on it, so this person will need a
+                  SmartDoc password instead.
+                </p>
+              );
+            })()}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
