@@ -941,8 +941,8 @@ export default function Projects() {
                               ["read", "read_model_id", "OCR"],
                             ] as const
                           ).map(([purpose, field, label]) => {
-                            // Tesseract reads and does not categorise, so it is
-                            // not offered under Categorise.
+                            // Only the models whose row says they can do
+                            // this job — Tesseract is not under Categorise.
                             const reading = purpose === "read";
                             const all = reading
                               ? ocrModels(offeredModels)

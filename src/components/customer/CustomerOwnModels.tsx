@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import Button from "../ui/button/Button";
 import Label from "../form/Label";
 import Input from "../form/input/InputField";
+import Checkbox from "../form/input/Checkbox";
 import { Modal } from "../ui/modal";
 import Toast from "../common/Toast";
 import {
@@ -17,6 +18,9 @@ const emptyModel = {
   model_name: "",
   display_name: "",
   endpoint: "",
+  // Both ticked for a new model, because most do both.
+  can_read: 1 as 0 | 1,
+  can_categorise: 1 as 0 | 1,
 };
 
 /**
@@ -85,6 +89,8 @@ export default function CustomerOwnModels({
       model_name: m.model_name,
       display_name: m.display_name,
       endpoint: m.endpoint ?? "",
+      can_read: Number(m.can_read) === 1 ? 1 : 0,
+      can_categorise: Number(m.can_categorise) === 1 ? 1 : 0,
     });
     setIsFormOpen(true);
   };
@@ -97,6 +103,8 @@ export default function CustomerOwnModels({
         model_name: form.model_name.trim(),
         display_name: form.display_name.trim(),
         endpoint: form.endpoint.trim(),
+        can_read: form.can_read,
+        can_categorise: form.can_categorise,
       };
       const saved = editing
         ? await modelCatalogueService.update({ ...payload, model_id: editing.model_id })
@@ -341,6 +349,26 @@ export default function CustomerOwnModels({
               placeholder="https://api.openai.com/v1/chat/completions"
             />
           </div>
+          {/* **What it can do.** Decides which dropdown it appears in:
+              Tesseract reads and cannot categorise, most AI models do both.
+              At least one has to be ticked. */}
+          <div>
+            <Label>Can do *</Label>
+            <div className="flex gap-6">
+              <Checkbox
+                id="own-can-read"
+                label="Read pages (OCR)"
+                checked={form.can_read === 1}
+                onChange={(checked) => setForm({ ...form, can_read: checked ? 1 : 0 })}
+              />
+              <Checkbox
+                id="own-can-categorise"
+                label="Categorise"
+                checked={form.can_categorise === 1}
+                onChange={(checked) => setForm({ ...form, can_categorise: checked ? 1 : 0 })}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="mt-5 flex justify-end gap-3">
@@ -356,7 +384,8 @@ export default function CustomerOwnModels({
               !form.display_name.trim() ||
               !form.provider.trim() ||
               !form.model_name.trim() ||
-              !form.endpoint.trim()
+              !form.endpoint.trim() ||
+              (form.can_read !== 1 && form.can_categorise !== 1)
             }
           >
             {saving ? "Saving..." : "Save"}

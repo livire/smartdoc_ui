@@ -57,41 +57,27 @@ export interface CatalogueModel {
    */
   retires_on?: string | null;
   endpoint: string;
+  /**
+   * What it can do. Tesseract reads and cannot categorise; most AI models
+   * do both. The choosers filter on these, never on the provider's name.
+   */
+  can_read: 0 | 1;
+  can_categorise: 0 | 1;
   created_at: string;
   // Only on a project's settings: which of the two levels chose it.
   source?: "project" | "customer";
 }
 
+/** Everything that can read a page. */
+export const ocrModels = (models: CatalogueModel[]) =>
+  models.filter((m) => Number(m.can_read) === 1);
+
 /**
- * Providers that can only read words off a page.
- *
- * Tesseract does OCR and nothing else — it cannot look at a scan and say
- * what kind of document it is. Offering it under Categorise meant a project
- * could be set to categorise with an engine that has no idea how, and the
- * failure only appeared once a page went through.
+ * Everything that can decide what a page is. smartdoc_api refuses the
+ * others on save as well — this only keeps them out of the dropdown.
  */
-const OCR_ONLY_PROVIDERS = ["tesseract"];
-
-export const isOcrOnly = (provider: string) =>
-  OCR_ONLY_PROVIDERS.includes(provider.toLowerCase());
-
-/** Everything that can read a page. All of them can. */
-export const ocrModels = (models: CatalogueModel[]) => models;
-
-/** Everything that can decide what a page is — so, not Tesseract. */
 export const categoriseModels = (models: CatalogueModel[]) =>
-  models.filter((m) => !isOcrOnly(m.provider));
-
-/**
- * What OCR falls back to when nobody has chosen.
- *
- * Tesseract runs inside `smartdoc_ocr_service` with no key and no bill, so
- * it is the sensible default rather than a blank that means "nothing reads
- * these pages". Returns null only if SmartDoc offers no Tesseract row at
- * all, which would be a catalogue somebody has emptied.
- */
-export const defaultOcrModel = (models: CatalogueModel[]) =>
-  models.find((m) => isOcrOnly(m.provider)) ?? null;
+  models.filter((m) => Number(m.can_categorise) === 1);
 
 /** SmartDoc's own, as opposed to one a customer added. */
 export const isSmartDocModel = (m: CatalogueModel) =>

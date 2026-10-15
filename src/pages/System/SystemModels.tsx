@@ -5,6 +5,7 @@ import { Modal } from "../../components/ui/modal";
 import Button from "../../components/ui/button/Button";
 import Label from "../../components/form/Label";
 import Input from "../../components/form/input/InputField";
+import Checkbox from "../../components/form/input/Checkbox";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "../../components/ui/table";
 import { LockIcon, PencilIcon } from "../../icons";
 import {
@@ -20,6 +21,10 @@ const emptyModel = {
   display_name: "",
   endpoint: "",
   is_offered: 1 as 0 | 1,
+  // Both ticked for a new model, because most do both. Untick Categorise
+  // for an engine like Tesseract that only reads.
+  can_read: 1 as 0 | 1,
+  can_categorise: 1 as 0 | 1,
   // The day it stops working. Empty is no end date, which is the usual
   // answer — a date is set when a model is on its way out.
   retires_on: "",
@@ -99,6 +104,8 @@ export default function SystemModels() {
       display_name: m.display_name,
       endpoint: m.endpoint ?? "",
       is_offered: m.is_offered,
+      can_read: Number(m.can_read) === 1 ? 1 : 0,
+      can_categorise: Number(m.can_categorise) === 1 ? 1 : 0,
       retires_on: m.retires_on ? String(m.retires_on).slice(0, 10) : "",
     });
     setIsFormOpen(true);
@@ -113,6 +120,8 @@ export default function SystemModels() {
         display_name: form.display_name.trim(),
         endpoint: form.endpoint.trim(),
         is_offered: form.is_offered,
+        can_read: form.can_read,
+        can_categorise: form.can_categorise,
         // Null, not "": the column is a date, and an empty string is not
         // one. Sent either way so clearing the field removes the date.
         retires_on: form.retires_on ? form.retires_on : null,
@@ -204,7 +213,7 @@ export default function SystemModels() {
           <Table>
             <TableHeader className="border-b border-gray-100 dark:border-gray-800">
               <TableRow>
-                {["Name", "Model id", "Provider", "Key", "Retires", "Offered", ""].map((h, i) => (
+                {["Name", "Model id", "Provider", "Can do", "Key", "Retires", "Offered", ""].map((h, i) => (
                   <TableCell
                     key={h || i}
                     isHeader
@@ -218,13 +227,13 @@ export default function SystemModels() {
             <TableBody className="divide-y divide-gray-100 dark:divide-gray-800">
               {loading ? (
                 <TableRow>
-                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={7}>
+                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={8}>
                     Loading...
                   </TableCell>
                 </TableRow>
               ) : shown.length === 0 ? (
                 <TableRow>
-                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={7}>
+                  <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={8}>
                     {term !== ""
                       ? "No model matches that."
                       : "No models yet. Add one, give it a key, and customers can choose it."}
@@ -246,6 +255,14 @@ export default function SystemModels() {
                     </TableCell>
                     <TableCell className="whitespace-nowrap px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
                       {m.provider}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                      {[
+                        Number(m.can_read) === 1 && "Read",
+                        Number(m.can_categorise) === 1 && "Categorise",
+                      ]
+                        .filter(Boolean)
+                        .join(", ") || "—"}
                     </TableCell>
                     <TableCell className="whitespace-nowrap px-4 py-3 text-sm">
                       {!providerNeedsKey(m.provider) ? (
@@ -390,6 +407,27 @@ export default function SystemModels() {
             </p>
           </div>
 
+          {/* **What it can do.** Decides which dropdown it appears in:
+              Tesseract reads and cannot categorise, most AI models do both.
+              At least one has to be ticked. */}
+          <div>
+            <Label>Can do *</Label>
+            <div className="flex gap-6">
+              <Checkbox
+                id="can-read"
+                label="Read pages (OCR)"
+                checked={form.can_read === 1}
+                onChange={(checked) => setForm({ ...form, can_read: checked ? 1 : 0 })}
+              />
+              <Checkbox
+                id="can-categorise"
+                label="Categorise"
+                checked={form.can_categorise === 1}
+                onChange={(checked) => setForm({ ...form, can_categorise: checked ? 1 : 0 })}
+              />
+            </div>
+          </div>
+
           {/* **Retiring a model is a date, not a switch.**
               Taking one away with no notice leaves a customer's
               categorisation stopping on a morning nobody chose. A date
@@ -461,7 +499,12 @@ export default function SystemModels() {
           <Button
             size="xs"
             onClick={save}
-            disabled={saving || !form.display_name.trim() || !form.model_name.trim()}
+            disabled={
+              saving ||
+              !form.display_name.trim() ||
+              !form.model_name.trim() ||
+              (form.can_read !== 1 && form.can_categorise !== 1)
+            }
           >
             {saving ? "Saving..." : "Save"}
           </Button>
