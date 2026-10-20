@@ -278,6 +278,9 @@ export default function Digitize() {
   const [reasonText, setReasonText] = useState("");
   const [reasonBusy, setReasonBusy] = useState(false);
   const [startingAssignment, setStartingAssignment] = useState(false);
+  // Why the server refused to start, shown in the dialog: a toast went
+  // behind it, so a refusal looked like a button that did nothing.
+  const [startError, setStartError] = useState<string | null>(null);
   const [closingAssignment, setClosingAssignment] = useState(false);
   // Why the API refused to close — "3 documents are still being processed",
   // say. Shown in the dialog, which is where the person is still standing.
@@ -755,10 +758,7 @@ export default function Digitize() {
       });
       setIsStartConfirmOpen(false);
     } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : "Failed to start assignment",
-        type: "error",
-      });
+      setStartError(err instanceof Error ? err.message : "Failed to start assignment");
     } finally {
       setStartingAssignment(false);
     }
@@ -1475,7 +1475,10 @@ export default function Digitize() {
                       )}
                       <Button
                         size="xs"
-                        onClick={() => setIsStartConfirmOpen(true)}
+                        onClick={() => {
+                          setStartError(null);
+                          setIsStartConfirmOpen(true);
+                        }}
                         startIcon={
                           /* A play mark: begin. */
                           <svg viewBox="0 0 24 24" fill="currentColor" className="size-3.5">
@@ -2245,6 +2248,11 @@ export default function Digitize() {
             ? "This batch was sent back for correction. Starting it reopens capture so you can replace the rejected documents."
             : "This becomes your assignment in progress, and you can only have one at a time."}
         </p>
+        {startError && (
+          <p role="alert" className="mb-4 text-sm text-error-600 dark:text-error-500">
+            {startError}
+          </p>
+        )}
         <div className="flex justify-end gap-2">
           <Button
             size="xs"
