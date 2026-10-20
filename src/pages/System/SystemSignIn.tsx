@@ -85,8 +85,11 @@ export default function SystemSignIn() {
         // Without it, sign-out lands on the customer's page. Harmless.
       }
       navigate("/sys/customers");
-    } catch {
-      // AuthContext puts the reason in `error`.
+    } catch (err) {
+      // Said here, on this form. AuthContext also keeps the reason in its
+      // `error`, but nothing on this page shows that — so a wrong password
+      // left the form sitting there as if nothing had happened (bug #26).
+      setFormError(err instanceof Error && err.message ? err.message : "Sign-in failed");
     }
   };
 

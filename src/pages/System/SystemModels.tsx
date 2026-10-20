@@ -509,10 +509,14 @@ export default function SystemModels() {
           <Button
             size="xs"
             onClick={save}
+            // Every field marked *: Provider and Address were marked and not
+            // checked, so Save went to the server to be refused (bug #21).
             disabled={
               saving ||
               !form.display_name.trim() ||
+              !form.provider.trim() ||
               !form.model_name.trim() ||
+              !form.endpoint.trim() ||
               (form.can_read !== 1 && form.can_categorise !== 1)
             }
           >
@@ -535,7 +539,9 @@ export default function SystemModels() {
         <Input
           id="api-key"
           compact
-          type="text"
+          // Hidden as it is typed, like any password: it is shown on a
+          // screen somebody else may be looking at (bug #21).
+          type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="sk-…"

@@ -109,9 +109,16 @@ export default function IdentifierPushCard({
       return { date: "No expiry", left: "—", tone: "text-gray-500 dark:text-gray-400" };
     }
     const when = new Date(k.expires_at);
-    const days = Math.ceil((when.getTime() - Date.now()) / 86_400_000);
     const date = when.toLocaleDateString();
-    if (days < 0) return { date, left: "expired", tone: "text-error-600 dark:text-error-500" };
+    if (when.getTime() <= Date.now()) {
+      return { date, left: "expired", tone: "text-error-600 dark:text-error-500" };
+    }
+    // Calendar days from today to the day it ends. Counted from the hours
+    // left, a 30-day key — which ends at 23:59 on its last day — said "31
+    // days" on the day it was issued (bug #32). Midnight to midnight, and
+    // rounded, so a clock change in between does not tip it either way.
+    const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const days = Math.round((midnight(when) - midnight(new Date())) / 86_400_000);
     if (days <= 14) {
       return {
         date,
@@ -122,7 +129,12 @@ export default function IdentifierPushCard({
     return { date, left: `${days} days`, tone: "text-gray-500 dark:text-gray-400" };
   };
 
+  // Asked first, naming the key: another system may be pushing with it, and
+  // a revoked key cannot be brought back. It went on one click (bug #17).
+  const [revokeAsk, setRevokeAsk] = useState<ProjectApiKey | null>(null);
+
   const revoke = async (keyId: number) => {
+    setRevokeAsk(null);
     setRevoking(keyId);
     try {
       await projectApiKeyService.revoke(projectId, keyId);
@@ -245,7 +257,7 @@ export default function IdentifierPushCard({
                           size="xs"
                           variant="outline"
                           disabled={revoking === k.project_api_key_id}
-                          onClick={() => revoke(k.project_api_key_id)}
+                          onClick={() => setRevokeAsk(k)}
                         >
                           {revoking === k.project_api_key_id ? "Revoking..." : "Revoke"}
                         </Button>
@@ -351,6 +363,29 @@ export default function IdentifierPushCard({
             </table>
           </div>
         </>
+      )}
+
+      {revokeAsk && (
+        <Modal isOpen onClose={() => setRevokeAsk(null)} className="max-w-md p-6">
+          <h3 className="mb-2 pr-10 text-lg font-semibold text-gray-800 dark:text-white/90">
+            Revoke key <code className="text-base">{revokeAsk.key_label}</code>?
+          </h3>
+          <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
+            Any system pushing identifiers with this key is refused from now on. A revoked key cannot
+            be brought back — that system would need a new one.{" "}
+            {revokeAsk.last_used_at
+              ? `It was last used on ${new Date(revokeAsk.last_used_at).toLocaleDateString()}.`
+              : "It has never been used."}
+          </p>
+          <div className="flex justify-end gap-3">
+            <Button size="xs" variant="outline" onClick={() => setRevokeAsk(null)}>
+              Cancel
+            </Button>
+            <Button size="xs" onClick={() => revoke(revokeAsk.project_api_key_id)}>
+              Revoke
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {/* Asked before the key exists: a lifetime cannot be changed

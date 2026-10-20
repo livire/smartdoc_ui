@@ -10,23 +10,20 @@ import Input from "../components/form/input/InputField";
 import ProjectCombobox from "../components/form/ProjectCombobox";
 import Pagination from "../components/ui/pagination/Pagination";
 import { PencilIcon, LockIcon } from "../icons";
-import { useCustomer } from "../context/CustomerContext";
 import { authService } from "../services/authService";
 import { documentService, Identifier, IdentifierLock } from "../services/documentService";
-import { userManagementService, Project } from "../services/userManagementService";
+import { useSetupProjects } from "../hooks/useSetupProjects";
 
 export default function Identifiers() {
   // Customer-level screen: the project picker in the header scopes the list.
   // Projects come from the customer-scoped endpoint and identifiers from the
   // project-scoped one, so neither call crosses the tenancy boundary — see
   // smartdoc_context/domain-model.md.
-  const { customer } = useCustomer();
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const { projects, selectedProjectId, setSelectedProjectId, loadingProjects, projectsError } =
+    useSetupProjects();
   const [identifiers, setIdentifiers] = useState<Identifier[]>([]);
 
-  const [loadingProjects, setLoadingProjects] = useState(true);
   const [loadingIdentifiers, setLoadingIdentifiers] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -86,25 +83,6 @@ export default function Identifiers() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const loadProjects = async () => {
-    if (!customer) return;
-    setLoadingProjects(true);
-    setError(null);
-    try {
-      const token = await authService.ensureValidToken();
-      const result = await userManagementService.getProjectsByCustomer(customer.customer_id, token);
-      setProjects(result);
-      // Land on a project so the screen isn't empty on arrival.
-      setSelectedProjectId((prev) =>
-        prev || (result.length > 0 ? String(result[0].project_id) : "")
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load projects");
-    } finally {
-      setLoadingProjects(false);
-    }
-  };
-
   const loadIdentifiers = async () => {
     if (!selectedProjectId) {
       setIdentifiers([]);
@@ -123,10 +101,10 @@ export default function Identifiers() {
     }
   };
 
+  // A failure to read the projects shows where every other load failure does.
   useEffect(() => {
-    loadProjects();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customer]);
+    if (projectsError) setError(projectsError);
+  }, [projectsError]);
 
   useEffect(() => {
     loadIdentifiers();
@@ -306,7 +284,7 @@ export default function Identifiers() {
             ) : projects.length === 0 ? (
               <TableRow>
                 <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={4}>
-                  No projects found for this customer
+                  No project here that you administer
                 </TableCell>
               </TableRow>
             ) : !selectedProjectId ? (
@@ -438,7 +416,10 @@ export default function Identifiers() {
             <span className="font-medium text-gray-700 dark:text-gray-300">
               {selectedProject?.project_name}
             </span>
-            , and starts open so documents can be uploaded against it.
+            {/* It said "starts open so documents can be uploaded against
+                it". A new one starts free, and nothing is uploaded to it until
+                a batch is given out or somebody starts one (bug #19). */}
+            , and starts free — ready to be given out as a batch or opened for sequencing.
           </p>
           <div className="flex justify-end gap-3 pt-2">
             <Button size="xs" type="button" variant="outline" onClick={() => setIsAddOpen(false)} disabled={creating}>

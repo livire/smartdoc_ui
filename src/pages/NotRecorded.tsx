@@ -9,11 +9,8 @@ import { useMembership } from "../context/MembershipContext";
 import { uploadService, DeadLetter, QueueHealth } from "../services/uploadService";
 import { authService } from "../services/authService";
 import { documentService } from "../services/documentService";
-import { assignmentStageService } from "../services/assignmentStageService";
 import { assignmentLabel, assignmentService } from "../services/assignmentService";
 import Pagination from "../components/ui/pagination/Pagination";
-
-const VERIFY_STAGE = 2;
 
 /**
  * Documents that were stored but never recorded — what the recording
@@ -22,15 +19,22 @@ const VERIFY_STAGE = 2;
  * a box for it on the dashboard itself was a box that said "nothing" almost
  * every day.
  *
- * An administrator sees the project's; a worker sees only the batches they
- * hold, which is all they can act on. Retry sends a document back through
- * the queue; the row disappears once the record is written, or comes back
- * with a new reason if it fails again.
+ * **For a project admin only**, and the whole project's. A worker's stuck
+ * documents can only be in the batch they are capturing — the server
+ * refuses to send a batch on while one is stuck — and Digitize shows those
+ * with its own Retry. Retry sends a document back through the queue; the
+ * row disappears once the record is written, or comes back with a new
+ * reason if it fails again.
+ *
+ * **Nothing is read until the role is known.** It used to read the queue at
+ * once and filter by role, and on a cold load the role had not arrived yet:
+ * an admin was shown the worker's view of their own batches — usually
+ * nothing — under "Nothing stuck", with documents stuck.
  */
 export default function NotRecorded() {
   const { user } = useAuth();
   const { project } = useProject();
-  const { membership } = useMembership();
+  const { membership, loading: roleLoading } = useMembership();
 
   const [stuck, setStuck] = useState<DeadLetter[]>([]);
   const [queueHealth, setQueueHealth] = useState<QueueHealth | null>(null);
@@ -45,7 +49,10 @@ export default function NotRecorded() {
   const [retrying, setRetrying] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  // One of the sizes the rows-per-page picker offers (10, 25, 50, 100). It
+  // started at 20, which the picker could not show, so it read 10 over a
+  // page of 20 (bug #27).
+  const [pageSize, setPageSize] = useState(25);
   // Rows can be read by what they belong to — a batch, a folio, a day —
   // which is how somebody decides whether to retry one or a whole batch.
   const [groupBy, setGroupBy] = useState<"none" | "assignment" | "identifier" | "date">("none");
@@ -105,27 +112,19 @@ export default function NotRecorded() {
     groupSizes.size > 0 && Array.from(groupSizes.keys()).every((k) => collapsed.has(k));
 
   const load = async () => {
-    if (!project || !user?.user_id) return;
+    if (!project || !user?.user_id || !membership.can_setup) return;
     setLoading(true);
     try {
       const token = await authService.ensureValidToken();
-      const [mine, { messages, queue }, details] = await Promise.all([
-        assignmentStageService.getMyWork(project.project_id, token),
+      const [{ messages, queue }, details] = await Promise.all([
         uploadService.getDeadLetters({ projectId: project.project_id }, token),
         documentService.getProjectById(project.project_id, token).catch(() => null),
       ]);
       setQueueHealth(queue);
       if (details?.identifier_label) setIdentifierLabel(details.identifier_label);
+      setStuck(messages);
 
-      const heldCapture = new Set(
-        mine.filter((m) => m.my_stage.stage_type !== VERIFY_STAGE).map((m) => String(m.assignment_id)),
-      );
-      const visible = membership.can_setup
-        ? messages
-        : messages.filter((m) => heldCapture.has(String(m.assignmentId)));
-      setStuck(visible);
-
-      if (visible.length > 0) {
+      if (messages.length > 0) {
         try {
           const rows = await assignmentService.getByProject(project.project_id, token);
           setAssignmentCodes(
@@ -141,7 +140,7 @@ export default function NotRecorded() {
       }
 
       const ids = Array.from(
-        new Set(visible.filter((m) => m.identifierId !== null).map((m) => Number(m.identifierId))),
+        new Set(messages.filter((m) => m.identifierId !== null).map((m) => Number(m.identifierId))),
       );
       const resolved = await Promise.all(
         ids.map(async (id) => {
@@ -165,8 +164,8 @@ export default function NotRecorded() {
     }
   };
 
-  const retry = async (filter: { assignmentId?: number; projectId?: number }) => {
-    const key = filter.assignmentId ? String(filter.assignmentId) : "all";
+  const retry = async (filter: { projectId?: number; objectKey?: string }) => {
+    const key = filter.objectKey ?? "all";
     setRetrying(key);
     try {
       const token = await authService.ensureValidToken();
@@ -188,7 +187,25 @@ export default function NotRecorded() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, user?.user_id]);
+  }, [project, user?.user_id, membership.can_setup]);
+
+  // The menu does not offer this screen to anybody else; this is for an
+  // address typed or a link followed.
+  if (roleLoading || !membership.can_setup) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-gray-50 p-6 dark:bg-gray-900">
+        <PageMeta title="Not Recorded | SmartDoc" description="Documents stored but never recorded" />
+        {roleLoading ? (
+          <span className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500 dark:border-gray-700 dark:border-t-brand-400" />
+        ) : (
+          <p className="max-w-md text-center text-sm text-gray-500 dark:text-gray-400">
+            This list is for project administrators. Documents in your own batch that were stored but
+            not recorded show on Digitize, with a Retry.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 w-full bg-gray-50 dark:bg-gray-900 overflow-hidden min-w-0 min-h-0">
@@ -242,7 +259,7 @@ export default function NotRecorded() {
               <Button size="xs" variant="outline" disabled={loading} onClick={load}>
                 Refresh
               </Button>
-              {stuck.length > 1 && membership.can_setup && (
+              {stuck.length > 1 && (
                 <Button
                   size="xs"
                   disabled={retrying !== null || !project}
@@ -317,11 +334,14 @@ export default function NotRecorded() {
                   size="xs"
                   variant="outline"
                   disabled={retrying !== null}
-                  onClick={() =>
-                    project && retry({ projectId: project.project_id, assignmentId: Number(m.assignmentId) })
-                  }
+                  // This one document, by where it is stored. It sent the
+                  // row's batch instead, and a document with no batch sent
+                  // batch 0 — which the upload service reads as no filter,
+                  // so one Retry retried every stuck document in the
+                  // project (bug #1). "Retry all" is the button for that.
+                  onClick={() => project && retry({ projectId: project.project_id, objectKey: m.objectKey })}
                 >
-                  {retrying === String(m.assignmentId) ? "Retrying..." : "Retry"}
+                  {retrying === m.objectKey ? "Retrying..." : "Retry"}
                 </Button>
               </td>
             </tr>

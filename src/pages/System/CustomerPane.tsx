@@ -3,7 +3,7 @@ import Button from "../../components/ui/button/Button";
 import Label from "../../components/form/Label";
 import Input from "../../components/form/input/InputField";
 import { authService } from "../../services/authService";
-import { customerService, CustomerSummary } from "../../services/customerService";
+import { customerService, CustomerSummary, cleanCustomerUrl, customerUrlProblem } from "../../services/customerService";
 import Users from "../Users";
 import Storage from "../Storage";
 import Toast from "../../components/common/Toast";
@@ -42,6 +42,10 @@ export default function CustomerPane({
   // decision, beside the project limit, not something they set.
   const [canAddModels, setCanAddModels] = useState(customer.can_add_models === 1);
   const [canAddSmtp, setCanAddSmtp] = useState(customer.can_add_smtp === 1);
+  // Whether they may use storage of their own. Saved the moment it is
+  // switched: the Storage tab has no Save, and its list is saved row by row.
+  const [canAddStorage, setCanAddStorage] = useState(customer.can_add_storage === 1);
+  const [savingStorageFlag, setSavingStorageFlag] = useState(false);
   // Which of SmartDoc's email accounts sends this customer's mail. "" is
   // the default one, which is every customer until somebody chooses.
   const [smtpId, setSmtpId] = useState(customer.smtp_id ? String(customer.smtp_id) : "");
@@ -110,7 +114,7 @@ export default function CustomerPane({
   const SAVE_TABS = ["customer", "branding", "models", "email", "password", "misc"];
 
   // SmartDoc's own email accounts, to choose a sender from. Read once —
-  // this list changes on /sys → Email, not here.
+  // this list changes on /sys → SMTP Server, not here.
   useEffect(() => {
     let cancelled = false;
     smtpService
@@ -143,6 +147,7 @@ export default function CustomerPane({
     setAllowed(String(customer.allowed_projects));
     setCanAddModels(customer.can_add_models === 1);
     setCanAddSmtp(customer.can_add_smtp === 1);
+    setCanAddStorage(customer.can_add_storage === 1);
     setSmtpId(customer.smtp_id ? String(customer.smtp_id) : "");
     setActive(customer.is_active === 1);
     setSaved(null);
@@ -167,23 +172,76 @@ export default function CustomerPane({
     const ok = await save();
     if (!ok) return;
 
-    await settingsRef.current?.save();
+    // The settings card shows its own error; stop there, so "Saved" is not
+    // shown beside it — it was, and the two together said nothing.
+    if (settingsRef.current && !(await settingsRef.current.save())) return;
     // The allowlist is its own record, written after the rest for the same
     // reason: if the row was refused, nothing else should have changed.
-    await modelsRef.current?.save();
+    // Unlike the card it does not report its own failure, so it is caught
+    // here and said here.
+    try {
+      await modelsRef.current?.save();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the AI models");
+      return;
+    }
 
     // Said once, at the end, for all three.
     setSaved("Saved");
   };
 
+  /**
+   * Switch "Allow own storage" and save it at once.
+   *
+   * The rest of the row is sent as it is stored, not as it stands in the
+   * Customer tab's boxes: the server writes name, address and limit on
+   * every save, and an unsaved edit there must not ride along with this.
+   */
+  const toggleOwnStorage = async () => {
+    const next = !canAddStorage;
+    setSavingStorageFlag(true);
+    try {
+      const token = await authService.ensureValidToken();
+      await customerService.updateCustomer(
+        {
+          customer_id: customer.customer_id,
+          customer_name: customer.customer_name,
+          customer_url: customer.customer_url,
+          allowed_projects: Number(customer.allowed_projects),
+          is_active: customer.is_active,
+          can_add_storage: (next ? 1 : 0) as 0 | 1,
+        },
+        token,
+      );
+      setCanAddStorage(next);
+      setToast({
+        message: next ? "They may now add storage of their own" : "Their storage is now SmartDoc's only",
+        type: "success",
+      });
+      onSaved();
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : "Could not save", type: "error" });
+    } finally {
+      setSavingStorageFlag(false);
+    }
+  };
+
   const save = async () => {
     if (!name.trim() || !url.trim()) return false;
+    // A rename to one of the app's own addresses. Its current address is
+    // left alone, whatever it is: refusing every save of such a customer
+    // would also stop the rename that fixes it.
+    const problem = cleanCustomerUrl(url) !== customer.customer_url ? customerUrlProblem(url) : null;
+    if (problem) {
+      setError(problem);
+      return false;
+    }
     setSaving(true);
     setSaved(null);
     setError(null);
     try {
       const token = await authService.ensureValidToken();
-      const cleanUrl = url.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+      const cleanUrl = cleanCustomerUrl(url);
       await customerService.updateCustomer(
         {
           customer_id: customer.customer_id,
@@ -324,7 +382,37 @@ export default function CustomerPane({
           /* Where this customer's documents live. Its own tab rather than a
              panel on the Customer tab: it has a list, a search and its own
              Add button, and the one Save there saves none of it. */
-          <Storage customerId={customer.customer_id} />
+          <>
+            <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-gray-200 bg-white px-6 py-3 dark:border-gray-700 dark:bg-gray-800">
+              <span>
+                <span className="block text-sm font-medium text-gray-800 dark:text-white/90">
+                  Allow own storage
+                </span>
+                <span className="block text-xs text-gray-500 dark:text-gray-400">
+                  Their administrator may add Amazon S3 or other S3-compatible storage. Off, they
+                  see their storages and change nothing. Turning it off moves nothing.
+                </span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={canAddStorage}
+                aria-label="Allow own storage"
+                disabled={savingStorageFlag}
+                onClick={toggleOwnStorage}
+                className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full p-0.5 transition-colors disabled:opacity-50 ${
+                  canAddStorage ? "bg-brand-500" : "bg-gray-300 dark:bg-gray-600"
+                }`}
+              >
+                <span
+                  className={`block size-3 rounded-full bg-white shadow-theme-xs transition-transform ${
+                    canAddStorage ? "translate-x-3" : ""
+                  }`}
+                />
+              </button>
+            </div>
+            <Storage customerId={customer.customer_id} />
+          </>
         ) : (
           <div className="space-y-4 p-4 pb-10">
             {/* A plain card, not a collapsible panel. It was one of several
@@ -475,8 +563,9 @@ export default function CustomerPane({
                       there is nothing to choose from yet. */}
                   {smtpOptions.length === 0 && (
                     <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      SmartDoc has no email account yet. Add one on /sys → Email, then choose it
-                      here.
+                      {/* The menu's own name for it (bug #20). */}
+                      SmartDoc has no email account yet. Add one on /sys → SMTP Server, then choose
+                      it here.
                     </p>
                   )}
                 </div>

@@ -5,14 +5,29 @@ import { useCustomer } from "../../context/CustomerContext";
 // and eight template demos — Alerts, Avatars, Badges, Buttons and the rest —
 // all of which were deleted with their routes. `humanize` below covers
 // anything missing from here, so a stale name is worse than no entry.
+//
+// **The menu's own word for every screen** (bug #5). It said "My
+// Assignments" on Assignments, "Arrange" on Sequencing and "Customer
+// Settings" on Customer — so the breadcrumb and the highlighted menu entry
+// named the same screen two ways.
 const pageTitles: Record<string, string> = {
   "": "Dashboard",
   profile: "Profile",
   notifications: "Notifications",
+  "my-assignments": "My Assignments",
   digitize: "Digitize",
   verify: "Verify",
-  assignments: "My Assignments",
-  "new-assignment": "New Assignment",
+  "not-recorded": "Not Recorded",
+  assignments: "Assignments",
+  // The old address of Assignments, which it still opens.
+  "new-assignment": "Assignments",
+  arrange: "Sequencing",
+  categories: "Categories",
+  attributes: "Attributes",
+  identifiers: "Identifiers",
+  "customer-settings": "Customer",
+  projects: "Projects",
+  storage: "Storage",
   users: "Users",
 };
 

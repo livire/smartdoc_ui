@@ -153,7 +153,13 @@ function LogoField({
  * between two sections. So the page needs to reach in and save.
  */
 export interface BrandingCardHandle {
-  save: () => Promise<void>;
+  /**
+   * Saves, and says whether it worked. On a failure this card has already
+   * shown the error, so the page must not say "Saved" over it — which it
+   * did, because this used to return the same way whether or not the server
+   * had refused.
+   */
+  save: () => Promise<boolean>;
   saving: boolean;
 }
 
@@ -340,11 +346,13 @@ function BrandingCard({
       // **No success message here.** The page owns the Save and says so
       // once; this said it too, so every save showed two toasts. Failures
       // still report from here — they name which part failed.
+      return true;
     } catch (err) {
       onToast({
         message: err instanceof Error ? err.message : "Failed to save",
         type: "error",
       });
+      return false;
     } finally {
       setSaving(false);
     }

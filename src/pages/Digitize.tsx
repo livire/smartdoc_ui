@@ -1272,11 +1272,11 @@ export default function Digitize() {
       setBatchRefresh((n) => n + 1);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to request upload URLs";
-      console.error("Failed to request upload URLs:", err);
+      // The address of the service is in the console, for whoever is
+      // working out why; the person uploading gets the reason only (bug #18).
+      console.error(`Failed to request upload URLs from ${import.meta.env.VITE_UPLOAD_API_URL}:`, err);
       setToast({
-        // Name the host actually being called — this used to say
-        // localhost:3001 whatever VITE_UPLOAD_API_URL pointed at.
-        message: `Upload Error: ${errorMessage} (${import.meta.env.VITE_UPLOAD_API_URL})`,
+        message: `Upload Error: ${errorMessage}`,
         type: "error",
       });
     } finally {

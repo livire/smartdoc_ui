@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
 import { useAuth } from "../../context/AuthContext";
 import { qualify } from "../../services/usernameRules";
 import { useCustomer } from "../../context/CustomerContext";
 import { EyeCloseIcon, EyeIcon } from "../../icons";
 import Label from "../form/Label";
 import Input from "../form/input/InputField";
-import Checkbox from "../form/input/Checkbox";
 import Button from "../ui/button/Button";
 import { customerService, CustomerDetails } from "../../services/customerService";
 import { authService, PASSWORD_CHANGE_REQUIRED, EMAIL_VERIFICATION_REQUIRED } from "../../services/authService";
@@ -86,7 +84,6 @@ export default function SignInForm({
     }
   };
   const [showPassword, setShowPassword] = useState(false);
-  const [isChecked, setIsChecked] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   // Set when a sign-in stopped because the address is unverified; holds the
   // username so the link can be sent again without asking for it twice.
@@ -524,13 +521,10 @@ export default function SignInForm({
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Checkbox checked={isChecked} onChange={setIsChecked} />
-                    <span className="block font-normal text-gray-700 text-theme-sm dark:text-gray-400">
-                      Keep me logged in
-                    </span>
-                  </div>
+                {/* "Keep me logged in" stood here, from the template, and did
+                    nothing: how long a session lasts is the customer's idle
+                    timeout (bug #8). */}
+                <div className="flex items-center justify-end">
                   <button
                     type="button"
                     className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400"
@@ -557,17 +551,6 @@ export default function SignInForm({
               )}
             </form>
 
-            <div className="mt-5">
-              <p className="text-sm font-normal text-center text-gray-700 dark:text-gray-400 sm:text-start">
-                Don&apos;t have an account? {""}
-                <Link
-                  to="/signup"
-                  className="text-brand-500 hover:text-brand-600 dark:text-brand-400"
-                >
-                  Sign Up
-                </Link>
-              </p>
-            </div>
           </div>
         </div>
       </div>

@@ -15,6 +15,7 @@ import NotesHistoryDialog, { NotesHistoryIcon } from "../components/assignments/
 import { useAuth } from "../context/AuthContext";
 import { useCustomer } from "../context/CustomerContext";
 import { useProject } from "../context/ProjectContext";
+import { Role } from "../context/MembershipContext";
 import { authService } from "../services/authService";
 import { documentService, Identifier, IdentifierLock } from "../services/documentService";
 import { userManagementService, AppUser } from "../services/userManagementService";
@@ -89,6 +90,17 @@ export default function Assignments() {
   // Keyed by String(id) — users and assignments come from different
   // endpoints, and MySQL BIGINT columns can serialize as strings from one
   // and numbers from the other, so a strict-type key/lookup can silently miss.
+  // Who a batch may go to: people on this project who capture — its
+  // Admins and Workers, and only enabled accounts. New Assignment and Hand
+  // over offered every user of the customer, Viewers and people on other
+  // projects included, and the server refused some of them only after the
+  // choice was made (bug #11). The filter and the names on the rows still
+  // use everybody: a batch can be held by somebody since taken off.
+  const [captureIds, setCaptureIds] = useState<Set<string>>(new Set());
+  const capturers = useMemo(
+    () => users.filter((u) => captureIds.has(String(u.user_id)) && Number(u.is_active) === 1),
+    [users, captureIds],
+  );
   const userById = useMemo(() => new Map(users.map((u) => [String(u.user_id), u])), [users]);
 
   const projectIdentifierIds = useMemo(
@@ -248,13 +260,21 @@ export default function Assignments() {
     setError(null);
     try {
       const token = await authService.ensureValidToken();
-      const [identifiersResult, usersResult, assignmentsResult] = await Promise.all([
+      const [identifiersResult, usersResult, assignmentsResult, members] = await Promise.all([
         documentService.getIdentifiers(project.project_id, token),
         userManagementService.getUsersByCustomer(customer.customer_id, token),
         assignmentService.getByProject(project.project_id, token),
+        userManagementService.getProjectMembers(project.project_id, token),
       ]);
       setIdentifiers(identifiersResult.data);
       setUsers(usersResult);
+      setCaptureIds(
+        new Set(
+          members
+            .filter((m) => Number(m.role_id) === Role.ADMIN || Number(m.role_id) === Role.WORKER)
+            .map((m) => String(m.user_id)),
+        ),
+      );
       setAssignments(assignmentsResult);
 
       // Resolve each assignment's identifier value directly by ID, rather
@@ -671,7 +691,7 @@ export default function Assignments() {
             <Label htmlFor="handover-to">Hand over to *</Label>
             <SearchSelect
               id="handover-to"
-              options={users
+              options={capturers
                 .filter((u) => String(u.user_id) !== String(currentHolder(actionOn)))
                 .map((u) => ({ value: String(u.user_id), label: short(u.username) }))}
               value={actionUserId}
@@ -737,7 +757,7 @@ export default function Assignments() {
             <Label htmlFor="assigned-to">Assign To *</Label>
             <SearchSelect
               id="assigned-to"
-              options={users.map((u) => ({ value: String(u.user_id), label: short(u.username) }))}
+              options={capturers.map((u) => ({ value: String(u.user_id), label: short(u.username) }))}
               value={newAssignedTo}
               onChange={setNewAssignedTo}
               placeholder="Type to search people"

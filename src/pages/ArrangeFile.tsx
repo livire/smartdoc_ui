@@ -1275,16 +1275,23 @@ export default function ArrangeFile() {
                         {/* Its place in the file, counted from the list rather than
                             read off the row — the stored number is spaced (1000,
                             2000) so a page can be slipped in later. */}
+                        {/* A way to move a page, so only while the file is
+                            open — like dragging. It opened the move box on a
+                            file nobody held: pages moved, and Save stayed off
+                            because there was nothing to save into (bug #12). */}
                         <span
-                          role="button"
+                          role={readOnly ? undefined : "button"}
                           tabIndex={-1}
-                          title="Click to move this page to another place"
+                          title={readOnly ? undefined : "Click to move this page to another place"}
                           onClick={(e) => {
+                            if (readOnly || saving) return;
                             e.stopPropagation();
                             setMoveId(page.image_id);
                             setMoveTo(String(index + 1));
                           }}
-                          className="absolute left-1 top-1 cursor-pointer rounded bg-gray-900/70 px-1.5 text-[10px] font-semibold text-white hover:bg-brand-500"
+                          className={`absolute left-1 top-1 rounded bg-gray-900/70 px-1.5 text-[10px] font-semibold text-white ${
+                            readOnly ? "" : "cursor-pointer hover:bg-brand-500"
+                          }`}
                         >
                           {index + 1}
                         </span>

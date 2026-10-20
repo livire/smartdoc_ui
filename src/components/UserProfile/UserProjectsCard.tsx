@@ -4,12 +4,15 @@ import Toast from "../common/Toast";
 import { useCustomer } from "../../context/CustomerContext";
 import { authService } from "../../services/authService";
 import { userManagementService, Project } from "../../services/userManagementService";
+import { Role } from "../../context/MembershipContext";
 
-// The two capacities a membership can have. Per project, not per person: the
-// same user may run one project and capture documents on another.
+// The capacities a membership can have. Per project, not per person: the
+// same user may run one project and capture documents on another. Viewer
+// was missing, so a viewer's own profile called them "Role 4" (bug #6).
 const ROLE_LABELS: Record<number, string> = {
-  1: "Admin",
-  2: "Worker",
+  [Role.ADMIN]: "Admin",
+  [Role.WORKER]: "Worker",
+  [Role.VIEWER]: "Viewer",
 };
 
 /**

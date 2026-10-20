@@ -4,7 +4,6 @@ import { authService } from "../services/authService";
 import { documentService } from "../services/documentService";
 import { projectSettingService } from "../services/projectSettingService";
 import { useProject } from "../context/ProjectContext";
-import { customerService } from "../services/customerService";
 import LogoPlaceholder from "../components/common/LogoPlaceholder";
 
 // Assume these icons are imported from an icon library
@@ -20,7 +19,7 @@ import {
 import { useSidebar } from "../context/SidebarContext";
 import { useMembership } from "../context/MembershipContext";
 import { useCustomer, storedCustomerUrl } from "../context/CustomerContext";
-import { useTheme } from "../context/ThemeContext";
+import { useCustomerBranding } from "../hooks/useCustomerBranding";
 
 type NavItem = {
   name: string;
@@ -85,9 +84,12 @@ const navItems: NavItem[] = [
       { name: "My Assignments", path: "/my-assignments", pro: false, workOnly: true },
       { name: "Digitize", path: "/digitize", pro: false, workOnly: true },
       { name: "Verify", path: "/verify", pro: false, workOnly: true },
-      // What was uploaded but never recorded; also announced on the
-      // dashboard when there is anything in it.
-      { name: "Not Recorded", path: "/not-recorded", pro: false, workOnly: true },
+      // What was uploaded but never recorded, across the project; also
+      // announced on the dashboard when there is anything in it. For a
+      // project admin only: a worker's stuck documents can only be in the
+      // one batch they are capturing — the server will not let a batch be
+      // sent on with one — and Digitize already shows those, with Retry.
+      { name: "Not Recorded", path: "/not-recorded", pro: false, adminOnly: true },
       { name: "Assignments", path: "/assignments", pro: false, adminOnly: true },
       // Putting a whole file in order crosses every batch ever captured
       // against a folio, so it is its own screen.
@@ -132,7 +134,6 @@ const navItems: NavItem[] = [
   },
 ];
 
-const othersItems: NavItem[] = [];
 
 /**
  * The customer half's addresses.
@@ -145,11 +146,36 @@ const othersItems: NavItem[] = [];
  */
 const CUSTOMER_PATHS = ["/customer-settings", "/projects", "/storage", "/users"];
 
-const spaceOf = (pathname: string, base: string): "customer" | "project" => {
+/**
+ * Screens that belong to neither half: a person's own notifications and
+ * profile. Opening one keeps the menu that was showing, with nothing
+ * highlighted. It used to switch to the project half, so a customer
+ * administrator with no project who opened the bell lost their own menu
+ * and got the project's, greyed (bug #28).
+ */
+const PERSONAL_PATHS = ["/notifications", "/profile"];
+
+type Half = "customer" | "project";
+
+const startsAt = (rest: string, p: string) => rest === p || rest.startsWith(`${p}/`);
+
+/** The half an address belongs to, or null for a personal screen. */
+const spaceOf = (pathname: string, base: string): Half | null => {
   const rest = pathname.startsWith(base) ? pathname.slice(base.length) : pathname;
-  return CUSTOMER_PATHS.some((p) => rest === p || rest.startsWith(`${p}/`))
-    ? "customer"
-    : "project";
+  if (PERSONAL_PATHS.some((p) => startsAt(rest, p))) return null;
+  return CUSTOMER_PATHS.some((p) => startsAt(rest, p)) ? "customer" : "project";
+};
+
+// The last half shown in this tab, so a personal screen keeps it — across a
+// reload too. Per tab: another tab may be in the other half.
+const LAST_HALF_KEY = "smartdoc.menu_half";
+const readLastHalf = (): Half | null => {
+  try {
+    const v = sessionStorage.getItem(LAST_HALF_KEY);
+    return v === "customer" || v === "project" ? v : null;
+  } catch {
+    return null;
+  }
 };
 
 const AppSidebar: React.FC = () => {
@@ -173,7 +199,21 @@ const AppSidebar: React.FC = () => {
   const base = `/${customer?.customer_url ?? storedCustomerUrl() ?? ""}`;
   // Where they are now decides which half of the menu they get. A customer
   // administrator who is also on a project has both, but never at once.
-  const here = spaceOf(locationNow.pathname, base);
+  const at = spaceOf(locationNow.pathname, base);
+  const lastHalf = useRef<Half | null>(readLastHalf());
+  if (at) lastHalf.current = at;
+  useEffect(() => {
+    if (!at) return;
+    try {
+      sessionStorage.setItem(LAST_HALF_KEY, at);
+    } catch {
+      // Without it a reload on a personal screen falls back to the rule below.
+    }
+  }, [at]);
+  // On a personal screen with nothing to go on — a fresh tab — the half
+  // they can use: the customer's for an administrator with no project open.
+  const here: Half =
+    at ?? lastHalf.current ?? (noProject && account.is_customer_admin ? "customer" : "project");
   // The one link at the foot of the menu points at the chooser whenever
   // there is no project to go back to, and at the other half otherwise.
   /**
@@ -227,79 +267,14 @@ const AppSidebar: React.FC = () => {
   // it is the thing every screen below is about — and on a project with
   // categorisation off, "Not categorised" is a finished state, not a wait.
   const [projectName, setProjectName] = useState<string | null>(null);
-  // The customer's own logo and name, when they have set them.
-  const [branding, setBranding] = useState<{
-    label: string | null;
-    logo: string | null;
-    logoDark: string | null;
-  }>(
-    () => {
-      // Straight from the cache, so the logo is on screen in the first
-      // paint rather than after a token and a request.
-      const cached = customer?.customer_id
-        ? customerService.readCachedSettings(customer.customer_id)
-        : // CustomerContext is still empty on the first render, so fall back
-          // to the customer stored in the browser.
-          customerService.readCachedSettingsForStoredCustomer();
-        // Either logo will do: a customer who sets one and not the other
-      // should see it everywhere rather than a placeholder on half the
-      // screens.
-      return {
-        label: cached?.customer_label ?? null,
-        logo: cached?.menu_logo ?? cached?.login_logo ?? null,
-        logoDark: cached?.menu_logo_dark ?? cached?.login_logo_dark ?? null,
-      };
-    },
-  );
-  // The customer's mark for the screen somebody is actually on. Falls back
-  // to the light one: most logos read on either background, and a customer
-  // who set only the one should see it rather than nothing.
-  const { theme } = useTheme();
-  const shownLogo = theme === "dark" ? branding.logoDark || branding.logo : branding.logo;
+  // The customer's own logo and name, shared with the phone header.
+  const { branding, shownLogo } = useCustomerBranding();
 
   const [autoStages, setAutoStages] = useState<{
     process: boolean;
     analyze: boolean;
     ocr: boolean;
   } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        // Usually the context knows which customer this is. When it does
-        // not — a reload that lost it, or a screen reached without going
-        // through sign-in — the url in the address bar still says, and a
-        // blank corner where the customer's logo belongs is worse than one
-        // extra request.
-        let customerId = customer?.customer_id ?? null;
-        if (!customerId) {
-          const url = storedCustomerUrl();
-          if (!url) return;
-          const response = await customerService.getCustomerByUrl(url);
-          customerId = response?.data?.customer_id ?? null;
-        }
-        if (!customerId || cancelled) return;
-
-        const token = await authService.ensureValidToken();
-        const settings = await customerService.getSettings(customerId, token);
-        if (!cancelled) {
-          setBranding({
-            label: settings?.customer_label ?? null,
-            logo: settings?.menu_logo ?? settings?.login_logo ?? null,
-            logoDark: settings?.menu_logo_dark ?? settings?.login_logo_dark ?? null,
-          });
-        }
-      } catch {
-        // The stock logo stays.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [customer?.customer_id]);
 
   useEffect(() => {
     if (!project?.project_id) {
@@ -361,9 +336,12 @@ const AppSidebar: React.FC = () => {
   );
 
   useEffect(() => {
+    // A personal screen matches no entry: leave the groups as they were
+    // rather than folding them all.
+    if (!at) return;
     let submenuMatched = false;
     ["main", "others"].forEach((menuType) => {
-      const items = menuType === "main" ? visibleNavItems : othersItems;
+      const items = menuType === "main" ? visibleNavItems : [];
       items.forEach((nav, index) => {
         if (nav.subItems) {
           nav.subItems.forEach((subItem) => {
@@ -388,7 +366,7 @@ const AppSidebar: React.FC = () => {
     // Setup collapsed because this ran before that answer arrived — and
     // never again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location, isActive, membership.can_setup, account.is_customer_admin, project?.project_id]);
+  }, [location, isActive, membership.can_setup, account.is_customer_admin, project?.project_id, at]);
 
   useEffect(() => {
     if (openSubmenu !== null) {
@@ -724,22 +702,9 @@ const AppSidebar: React.FC = () => {
                   Only for a customer administrator — nobody else has two
                   halves to move between. */}
             </div>
-            <div className="">
-              <h2
-                className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
-                  !isExpanded && !isHovered
-                    ? "lg:justify-center"
-                    : "justify-start"
-                }`}
-              >
-                {isExpanded || isHovered || isMobileOpen ? (
-                  "Others"
-                ) : (
-                  <HorizontaLDots />
-                )}
-              </h2>
-              {renderMenuItems(othersItems, "others")}
-            </div>
+            {/* An "Others" group from the template stood here, always empty,
+                so every menu ended in a heading with nothing under it
+                (bug #25). */}
           </div>
         </nav>
       </div>

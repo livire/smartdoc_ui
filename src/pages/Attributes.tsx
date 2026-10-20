@@ -11,10 +11,9 @@ import Checkbox from "../components/form/input/Checkbox";
 import ProjectCombobox from "../components/form/ProjectCombobox";
 import Pagination from "../components/ui/pagination/Pagination";
 import { PencilIcon } from "../icons";
-import { useCustomer } from "../context/CustomerContext";
 import { authService } from "../services/authService";
 import { documentService, Attribute } from "../services/documentService";
-import { userManagementService, Project } from "../services/userManagementService";
+import { useSetupProjects } from "../hooks/useSetupProjects";
 
 type AttributeType = "S" | "N" | "D";
 
@@ -52,13 +51,11 @@ type FormErrors = Partial<Record<keyof typeof emptyForm, string>>;
 export default function Attributes() {
   // Customer-level screen: the project picker scopes the list, since attribute
   // definitions are project-scoped.
-  const { customer } = useCustomer();
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const { projects, selectedProjectId, setSelectedProjectId, loadingProjects, projectsError } =
+    useSetupProjects();
   const [attributes, setAttributes] = useState<Attribute[]>([]);
 
-  const [loadingProjects, setLoadingProjects] = useState(true);
   const [loadingAttributes, setLoadingAttributes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -108,22 +105,6 @@ export default function Attributes() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const loadProjects = async () => {
-    if (!customer) return;
-    setLoadingProjects(true);
-    setError(null);
-    try {
-      const token = await authService.ensureValidToken();
-      const result = await userManagementService.getProjectsByCustomer(customer.customer_id, token);
-      setProjects(result);
-      setSelectedProjectId((prev) => prev || (result.length > 0 ? String(result[0].project_id) : ""));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load projects");
-    } finally {
-      setLoadingProjects(false);
-    }
-  };
-
   const loadAttributes = async () => {
     if (!selectedProjectId) {
       setAttributes([]);
@@ -142,10 +123,10 @@ export default function Attributes() {
     }
   };
 
+  // A failure to read the projects shows where every other load failure does.
   useEffect(() => {
-    loadProjects();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customer]);
+    if (projectsError) setError(projectsError);
+  }, [projectsError]);
 
   useEffect(() => {
     loadAttributes();
@@ -378,7 +359,7 @@ export default function Attributes() {
             ) : projects.length === 0 ? (
               <TableRow>
                 <TableCell className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400" colSpan={7}>
-                  No projects found for this customer
+                  No project here that you administer
                 </TableCell>
               </TableRow>
             ) : !selectedProjectId ? (

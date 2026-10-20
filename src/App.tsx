@@ -29,7 +29,6 @@ const SystemCustomers = lazy(() => import("./pages/System/SystemCustomers"));
 const SystemModels = lazy(() => import("./pages/System/SystemModels"));
 const SystemEmail = lazy(() => import("./pages/System/SystemEmail"));
 const SystemSignInSettings = lazy(() => import("./pages/System/SystemSignInSettings"));
-const SignUp = lazy(() => import("./pages/AuthPages/SignUp"));
 const SetPassword = lazy(() => import("./pages/AuthPages/SetPassword"));
 const Digitize = lazy(() => import("./pages/Digitize"));
 const Users = lazy(() => import("./pages/Users"));
@@ -174,7 +173,9 @@ export default function App() {
 
           {/* Signin Entry Point */}
           <Route path="/signin" element={<SignIn />} />
-          <Route path="/signup" element={<SignUp />} />
+          {/* No /signup: it was the template's sign-up page, whose form did
+              nothing. People are added by their customer administrator
+              (bug #8). */}
 
           {/* Fallback Route */}
           <Route path="*" element={<NotFound />} />

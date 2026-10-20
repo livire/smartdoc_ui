@@ -79,10 +79,24 @@ export default function CustomerSettings() {
   const saveEverything = async () => {
     setSavingAll(true);
     try {
-      if (canEditRow) await saveRow();
-      await settingsRef.current?.save();
-      await workAreasRef.current?.save();
-      await viewerAreasRef.current?.save();
+      // Each part that fails has already said why, so a failure stops here:
+      // nothing after it is written, and "Saved" never lands on top of the
+      // error — it used to, which read as the save having worked.
+      if (canEditRow && !(await saveRow())) return;
+      if (settingsRef.current && !(await settingsRef.current.save())) return;
+      // The notification cards, unlike the settings card, do not show their
+      // own failure — they throw. Uncaught, a refused save showed nothing at
+      // all and left the switches looking saved.
+      try {
+        await workAreasRef.current?.save();
+        await viewerAreasRef.current?.save();
+      } catch (err) {
+        setToast({
+          message: err instanceof Error ? err.message : "Could not save the notification settings",
+          type: "error",
+        });
+        return;
+      }
 
       // One message for the screen, not one per card.
       setToast({ message: "Saved", type: "success" });
@@ -130,10 +144,11 @@ export default function CustomerSettings() {
     };
   }, [customer?.customer_id, customer?.customer_name]);
 
-  const saveRow = async () => {
+  /** Saves the customer's own row; says whether it worked (a failure has shown its message). */
+  const saveRow = async (): Promise<boolean> => {
     // An empty limit means the row could not be read, not "no projects" —
     // saving then would write 0 and lock the customer out of new projects.
-    if (!customer?.customer_id || !name.trim() || !url.trim() || allowed.trim() === "") return;
+    if (!customer?.customer_id || !name.trim() || !url.trim() || allowed.trim() === "") return false;
     setSavingRow(true);
     try {
       const token = await authService.ensureValidToken();
@@ -165,6 +180,7 @@ export default function CustomerSettings() {
       if (cleanUrl !== customer.customer_url) {
         window.location.assign(`/${cleanUrl}/customer-settings`);
       }
+      return true;
     } catch (err) {
       // The server explains a refusal — "already has 4 projects" — so it is
       // shown as it comes.
@@ -172,6 +188,7 @@ export default function CustomerSettings() {
         message: err instanceof Error ? err.message : "Failed to save",
         type: "error",
       });
+      return false;
     } finally {
       setSavingRow(false);
     }

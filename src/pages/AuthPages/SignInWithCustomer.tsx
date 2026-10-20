@@ -204,10 +204,17 @@ export default function SignInWithCustomer() {
         const admin = Boolean((await authService.getMe(token)).is_customer_admin);
         const destinations = mine.length + (admin ? 1 : 0);
 
-        if (destinations > 1) {
-          // More than one place to be: they say which. A project remembered
-          // from last time does not answer it — they may have signed in to
-          // do the other thing.
+        if (destinations > 1 && !storedIsMine) {
+          // More than one place to be, and nothing chosen yet: they say
+          // which.
+          //
+          // **A project already chosen answers it.** Signing in clears the
+          // choice (AuthContext's `login`), so one still here was made in
+          // this session — in another tab, or on the chooser a moment ago.
+          // The "already checked" mark is kept per tab, so without this
+          // every new tab sent them back to the chooser, and a chooser
+          // opened by its address bounced the first pick straight back to
+          // itself (bug #29).
           navigate(`/${customerUrl}/select-project`);
           return;
         }

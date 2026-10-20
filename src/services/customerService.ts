@@ -1,6 +1,26 @@
 import { cached, FOREVER, forget } from "./cache";
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 
+/**
+ * Addresses that are the app's own, so no customer can sign in at one:
+ * `/sys`, `/signin`, `/signup`, `/auth/callback` (company sign-in), and the
+ * built app's `/assets` and `/images` (bug #16). The API refuses them on its
+ * own terms (`smartdoc_api` `service/customerUrlRules.js`); this is the same
+ * list, so the form can say so before it is sent.
+ */
+export const RESERVED_CUSTOMER_URLS = ["sys", "signin", "signup", "auth", "assets", "images"];
+
+/** A typed address as it will be stored: a url segment. */
+export const cleanCustomerUrl = (typed: string) => typed.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+
+/** Why this address cannot be used, or null when it can. */
+export const customerUrlProblem = (typed: string): string | null => {
+  const url = cleanCustomerUrl(typed);
+  return RESERVED_CUSTOMER_URLS.includes(url)
+    ? `/${url} is one of SmartDoc's own addresses — choose another`
+    : null;
+};
+
 export interface CustomerDetails {
   customer_id: number;
   customer_name: string;
@@ -17,6 +37,12 @@ export interface CustomerDetails {
    * SmartDoc's address.
    */
   can_add_smtp?: 0 | 1;
+  /**
+   * Whether SmartDoc has agreed this customer may use storage of their own
+   * (Amazon S3, or another S3-compatible service). Without it they use
+   * only the SmartDoc bucket made for them on /sys.
+   */
+  can_add_storage?: 0 | 1;
   /**
    * Which of SmartDoc's email accounts sends this customer's mail. **Null is
    * the default one.** An account of their own, when they have one, is used
@@ -190,6 +216,8 @@ export const customerService = {
       can_add_models?: 0 | 1;
       /** The same for their own email server. Omit to leave it alone. */
       can_add_smtp?: 0 | 1;
+      /** The same for storage of their own. Omit to leave it alone. */
+      can_add_storage?: 0 | 1;
       /** Which SmartDoc email account sends their mail; null is the default. */
       smtp_id?: number | null;
     },

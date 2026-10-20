@@ -143,23 +143,23 @@ export const userManagementService = {
    *
    * Temporary: Keycloak makes them choose their own at the next sign-in, so
    * the one that was read down a phone stops working once it has been used.
-   * Needs Keycloak's `manage-users` on the caller's own account, like
-   * creating a user does.
+   *
+   * **Through smartdoc_api, not auth_api** (2026-10-18). Sent to auth_api
+   * with the administrator's own token, Keycloak judged them and refused
+   * every customer administrator (bug #31). smartdoc_api decides on
+   * SmartDoc's roles and asks auth_api as itself, as creating a user does.
    */
-  async setPassword(
-    keycloakId: string,
-    password: string,
-    accessToken: string,
-  ): Promise<void> {
-    const response = await fetch(`${AUTH_API_URL}/set_password`, {
+  async setPassword(userId: number, password: string, accessToken: string): Promise<void> {
+    const response = await fetch(`${API_URL}/user/${userId}/temporary_password`, {
       method: "POST",
       headers: jsonHeaders(accessToken),
-      body: JSON.stringify({ user_id: keycloakId, password, temporary: true }),
+      body: JSON.stringify({ password }),
     });
 
     if (!response.ok) {
-      // Keycloak's own password policy answers here — "invalid password:
-      // minimum length" — which is what somebody needs to read.
+      // The customer's password rules, or Keycloak's own policy, answer
+      // here — "invalid password: minimum length" — which is what somebody
+      // needs to read.
       throw new Error(await extractMessage(response, "Failed to set the password"));
     }
   },
@@ -213,6 +213,25 @@ export const userManagementService = {
       const body = await response.json();
       return (body.data || []) as UserProject[];
     });
+  },
+
+  /**
+   * Who is on one project, with their role there. What New Assignment and
+   * Hand over offer is drawn from this: a batch can only go to somebody who
+   * works on the project.
+   */
+  async getProjectMembers(projectId: number, accessToken: string): Promise<UserProject[]> {
+    const response = await fetch(`${API_URL}/user_project/project/${projectId}`, {
+      method: "GET",
+      headers: jsonHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractMessage(response, "Failed to fetch the project's people"));
+    }
+
+    const body = await response.json();
+    return (body.data || []) as UserProject[];
   },
 
   // roleId is the capacity the user gets on THIS project: 1 = admin,
@@ -383,28 +402,30 @@ export const userManagementService = {
     return body.data;
   },
 
-  async setKeycloakUserStatus(
-    keycloakUserId: string,
-    enabled: boolean,
-    accessToken: string
-  ): Promise<void> {
-    const response = await fetch(`${AUTH_API_URL}/user_status`, {
+  /**
+   * Switch somebody on or off: their sign-in account and their SmartDoc
+   * record, in one call to smartdoc_api, which makes both changes.
+   *
+   * The screen used to make them itself — auth_api with the administrator's
+   * own token, which Keycloak refused for every customer administrator
+   * (bug #31), then the row — and a failure between the two left them
+   * disagreeing.
+   */
+  async setUserActive(userId: number, enabled: boolean, accessToken: string): Promise<AppUser> {
+    const response = await fetch(`${API_URL}/user/${userId}/status`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ user_id: keycloakUserId, enabled }),
+      headers: jsonHeaders(accessToken),
+      body: JSON.stringify({ enabled }),
     });
 
     if (!response.ok) {
-      throw new Error(await extractMessage(response, "Failed to update Keycloak user status"));
+      throw new Error(await extractMessage(response, "Failed to change the account"));
     }
 
-    // Enabled/disabled is a Keycloak field, so it is Keycloak's copy that
-    // went stale — the one write here that does not look like it touches a
-    // list at all.
-    forget(KEY.keycloak);
+    // Both copies changed: the row's is_active and Keycloak's enabled flag.
+    forgetPeople();
+    const body = await response.json();
+    return body.data;
   },
 
   async createProject(

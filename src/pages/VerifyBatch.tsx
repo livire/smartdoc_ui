@@ -850,7 +850,22 @@ export default function VerifyBatch() {
       <div className="flex min-h-0 flex-1">
         {/* The batch */}
         <div className="relative min-h-0 flex-1 overflow-auto p-4">
-          {images.length === 0 && !loading ? (
+          {!assignmentId && !resolving && resolvedId === null && !error ? (
+            // Bare /verify with nothing held. It said "This batch has no
+            // documents", about a batch that does not exist (bug #7). The
+            // queue to claim one from is on the dashboard.
+            <span className="flex items-center gap-3">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                You are not verifying a batch.
+              </p>
+              <Button
+                size="xs"
+                onClick={() => navigate(`/${customer?.customer_url ?? storedCustomerUrl() ?? ""}`)}
+              >
+                Go to the dashboard
+              </Button>
+            </span>
+          ) : images.length === 0 && !loading ? (
             <p className="text-sm text-gray-500 dark:text-gray-400">This batch has no documents</p>
           ) : (
             <>

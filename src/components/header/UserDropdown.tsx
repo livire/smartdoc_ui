@@ -5,7 +5,8 @@ import { useNavigate } from "react-router";
 import { useAuth } from "../../context/AuthContext";
 import { useCustomer, storedCustomerUrl } from "../../context/CustomerContext";
 import { authService } from "../../services/authService";
-import { avatarService } from "../../services/avatarService";
+import { avatarService, AVATAR_CHANGED } from "../../services/avatarService";
+import type { AvatarChange } from "../../services/avatarService";
 import ChangePasswordDialog from "../auth/ChangePasswordDialog";
 import Toast from "../common/Toast";
 import { useShortName } from "../../hooks/useShortName";
@@ -23,16 +24,28 @@ export default function UserDropdown() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   // The picture set on the profile screen. Fetched once — it is a small data
-  // URL from the database, not a file.
+  // URL from the database, not a file — and then kept up to date by the
+  // profile screen saying when it changes it.
   useEffect(() => {
     if (!user?.user_id) return;
     let cancelled = false;
+    // A change made while the first read is still on its way wins over
+    // that read's older answer.
+    let changed = false;
+
+    const onChange = (event: Event) => {
+      const { userId, dataUrl } = (event as CustomEvent<AvatarChange>).detail;
+      if (String(userId) !== String(user.user_id)) return;
+      changed = true;
+      setAvatar(dataUrl);
+    };
+    window.addEventListener(AVATAR_CHANGED, onChange);
 
     (async () => {
       try {
         const token = await authService.ensureValidToken();
         const stored = await avatarService.get(user.user_id!, token);
-        if (!cancelled) setAvatar(stored);
+        if (!cancelled && !changed) setAvatar(stored);
       } catch {
         // Initials will do.
       }
@@ -40,6 +53,7 @@ export default function UserDropdown() {
 
     return () => {
       cancelled = true;
+      window.removeEventListener(AVATAR_CHANGED, onChange);
     };
   }, [user?.user_id]);
 
@@ -190,31 +204,8 @@ export default function UserDropdown() {
               Reset password
             </DropdownItem>
           </li>
-          <li>
-            <DropdownItem
-              onItemClick={closeDropdown}
-              tag="a"
-              to={`${base}/profile`}
-              className="flex items-center gap-3 px-3 py-2 font-medium text-gray-700 rounded-lg group text-theme-sm hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-300"
-            >
-              <svg
-                className="fill-gray-500 group-hover:fill-gray-700 dark:fill-gray-400 dark:group-hover:fill-gray-300"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  fillRule="evenodd"
-                  clipRule="evenodd"
-                  d="M3.5 12C3.5 7.30558 7.30558 3.5 12 3.5C16.6944 3.5 20.5 7.30558 20.5 12C20.5 16.6944 16.6944 20.5 12 20.5C7.30558 20.5 3.5 16.6944 3.5 12ZM12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2ZM11.0991 7.52507C11.0991 8.02213 11.5021 8.42507 11.9991 8.42507H12.0001C12.4972 8.42507 12.9001 8.02213 12.9001 7.52507C12.9001 7.02802 12.4972 6.62507 12.0001 6.62507H11.9991C11.5021 6.62507 11.0991 7.02802 11.0991 7.52507ZM12.0001 17.3714C11.5859 17.3714 11.2501 17.0356 11.2501 16.6214V10.9449C11.2501 10.5307 11.5859 10.1949 12.0001 10.1949C12.4143 10.1949 12.7501 10.5307 12.7501 10.9449V16.6214C12.7501 17.0356 12.4143 17.3714 12.0001 17.3714Z"
-                  fill=""
-                />
-              </svg>
-              Support
-            </DropdownItem>
-          </li>
+          {/* "Support" stood here and opened the profile page. There is no
+              support page to send anybody to, so it went (bug #9). */}
         </ul>
         <button
           onClick={() => {

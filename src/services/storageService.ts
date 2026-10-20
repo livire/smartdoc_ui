@@ -13,7 +13,12 @@ const extractMessage = async (response: Response, fallback: string) => {
   }
 };
 
-export type StorageProvider = "aws" | "minio";
+/**
+ * "smartdoc" — a bucket on SmartDoc's own object store, made on /sys. Only
+ * the bucket is kept; its address, region and keys are SmartDoc's and the
+ * API fills them in. "aws" / "minio" — storage the customer owns.
+ */
+export type StorageProvider = "smartdoc" | "aws" | "minio";
 
 export interface Storage {
   customer_storage_id: number;
@@ -22,14 +27,16 @@ export interface Storage {
   storage_provider: StorageProvider;
   s3_bucket: string;
   // NULL for AWS — the SDK derives it from the region. Required for MinIO.
+  // NULL for SmartDoc.
   s3_endpoint: string | null;
-  s3_region: string;
+  // NULL for SmartDoc, whose region is SmartDoc's.
+  s3_region: string | null;
   // The FOLDER in Vault, e.g. "kv/data/smartdoc_storage". This row's id is
   // appended by the API to reach the secret itself.
   vault_path: string;
   is_active: 0 | 1;
-  // Returned by the API, never sent: vault_path + "/" + customer_storage_id.
-  // This is where the credentials must be written.
+  // Returned by the API, never sent: vault_path + "/" + customer_storage_id,
+  // or SmartDoc's one key pair for a SmartDoc storage. Where the keys are.
   resolved_vault_path?: string;
 }
 
@@ -75,7 +82,8 @@ export const storageService = {
   },
 
   async createStorage(
-    input: Omit<Storage, "customer_storage_id" | "resolved_vault_path">,
+    // No vault_path: the API sets the folder itself (VAULT_STORAGE_FOLDER).
+    input: Omit<Storage, "customer_storage_id" | "resolved_vault_path" | "vault_path">,
     accessToken: string
   ): Promise<Storage> {
     const response = await fetch(`${API_URL}/customer_storage/`, {
@@ -167,3 +175,10 @@ export const storageService = {
     return body.data;
   },
 };
+
+/**
+ * What a provider is called where the form's long label does not fit.
+ * "minio" is any S3-compatible service at its own address, not only MinIO.
+ */
+export const providerShortName = (provider: StorageProvider) =>
+  provider === "smartdoc" ? "SmartDoc" : provider === "aws" ? "Amazon S3" : "S3-compatible";

@@ -120,8 +120,11 @@ Two things about it are easy to get wrong:
 
 - **Keys are a second step, not a form field.** A storage's Vault path is
   built from its own id, so it cannot exist until the row does. Creating a
-  storage therefore opens the keys dialog straight away. `vault_path` on the
-  row is only the FOLDER; the API appends the id.
+  storage therefore opens the keys dialog straight away. **The form has no
+  Vault folder** (2026-10-18): the API puts the keys in its own
+  `VAULT_STORAGE_FOLDER` plus the storage's id, and drops a folder sent to
+  it. A folder the customer could type let "Save Keys" overwrite another
+  secret, such as an AI model's key.
 - **Keys go in and never come back.** `POST /customer_storage/credentials`
   answers `{ok, vault_path}` — no key values, because `smartdoc_api` logs every
   response body. The row's status ("Stored" / "Not set") comes from

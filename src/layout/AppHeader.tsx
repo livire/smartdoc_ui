@@ -6,11 +6,16 @@ import { ThemeToggleButton } from "../components/common/ThemeToggleButton";
 import NotificationDropdown from "../components/header/NotificationDropdown";
 import UserDropdown from "../components/header/UserDropdown";
 import PageBreadcrumb from "../components/common/PageBreadCrumb";
+import LogoPlaceholder from "../components/common/LogoPlaceholder";
+import { useCustomerBranding } from "../hooks/useCustomerBranding";
+import { useCustomer } from "../context/CustomerContext";
 
 const AppHeader: React.FC = () => {
   const [isApplicationMenuOpen, setApplicationMenuOpen] = useState(false);
 
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
+  const { customer } = useCustomer();
+  const { branding, shownLogo } = useCustomerBranding();
 
   const handleToggle = () => {
     if (window.innerWidth >= 1024) {
@@ -67,17 +72,15 @@ const AppHeader: React.FC = () => {
             {/* Cross Icon */}
           </button>
 
+          {/* The customer's logo, as on the menu — or the placeholder with
+              their name. It was the template's logo, by a ./images path that
+              broke on every screen below the customer's address (bug #10). */}
           <Link to="/" className="lg:hidden">
-            <img
-              className="dark:hidden"
-              src="./images/logo/logo.svg"
-              alt="Logo"
-            />
-            <img
-              className="hidden dark:block"
-              src="./images/logo/logo-dark.svg"
-              alt="Logo"
-            />
+            {shownLogo ? (
+              <img src={shownLogo} alt={branding.label ?? "Logo"} className="h-8 w-auto max-w-40 object-contain" />
+            ) : (
+              <LogoPlaceholder name={branding.label ?? customer?.customer_name} size="sm" />
+            )}
           </Link>
 
           <button

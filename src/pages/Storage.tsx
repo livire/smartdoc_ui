@@ -9,24 +9,39 @@ import Input from "../components/form/input/InputField";
 import { PencilIcon, LockIcon, CheckCircleIcon, CloseLineIcon } from "../icons";
 import Tip from "../components/ui/tooltip/Tip";
 import { useCustomer } from "../context/CustomerContext";
+import { useMembership } from "../context/MembershipContext";
+import { customerService } from "../services/customerService";
 import { authService } from "../services/authService";
-import { storageService } from "../services/storageService";
+import { storageService, providerShortName } from "../services/storageService";
 import type { Storage as StorageRow, StorageProvider } from "../services/storageService";
 
 // Matches customer_storage's column widths.
 const MAX_NAME_CHARS = 100;
 const MAX_BUCKET_CHARS = 100;
 
-// The folder every storage sits under. Only the folder is stored — the API
-// appends the storage's own id to reach the secret. Editable, because a
-// customer whose credentials live elsewhere in Vault is a row change rather
-// than a code change.
-const DEFAULT_VAULT_FOLDER = "kv/data/smartdoc_storage";
+// No Vault folder on this form. Where a storage's keys go is the
+// installation's (smartdoc_api VAULT_STORAGE_FOLDER) plus the storage's id:
+// a folder a customer could type let "Save Keys" write over another secret
+// the write token reaches, such as the AI models' keys (2026-10-18).
 
-const PROVIDER_OPTIONS: { value: StorageProvider; label: string }[] = [
-  { value: "minio", label: "MinIO (self-hosted)" },
+// "minio" is any S3-compatible service at its own address, not only MinIO:
+// what it decides is that an endpoint is given and the bucket goes in the
+// path (smartdoc_upload_api, s3.js). Amazon is kept apart on purpose — its
+// address comes from the region and its bucket goes in the hostname, and
+// guessing which a storage is from whether an endpoint was typed was a real
+// bug here once. The stored value stays "minio" for every existing row.
+//
+// "SmartDoc" is a bucket on SmartDoc's own object store: only somebody on
+// /sys makes one, and only the bucket is asked for. The other two are the
+// customer's own, offered to their administrator only when SmartDoc has
+// allowed it (customer.can_add_storage). The API refuses the rest whatever
+// this offers.
+const PROVIDER_OPTIONS: { value: StorageProvider; label: string; sysOnly?: boolean }[] = [
+  { value: "smartdoc", label: "SmartDoc", sysOnly: true },
   { value: "aws", label: "Amazon S3" },
+  { value: "minio", label: "Other S3-compatible (MinIO, Wasabi, R2…)" },
 ];
+
 
 const emptyForm = {
   storage_name: "",
@@ -34,7 +49,6 @@ const emptyForm = {
   s3_bucket: "",
   s3_endpoint: "",
   s3_region: "us-east-1",
-  vault_path: DEFAULT_VAULT_FOLDER,
 };
 
 type FormErrors = Partial<Record<keyof typeof emptyForm, string>>;
@@ -108,6 +122,8 @@ export default function Storage({
   // administrator is, from /sys — where there is no customer in context at
   // all, by design.
   const { customer: contextCustomer } = useCustomer();
+  const { account } = useMembership();
+  const isSys = account.is_sysadmin;
   // Held steady: built fresh on every render it was a new object each time,
   // so every effect that depends on it ran again, which fetched, which
   // rendered — the screen flickered and the network tab filled up.
@@ -143,6 +159,16 @@ export default function Storage({
   const [keyForm, setKeyForm] = useState({ access: "", secret: "" });
   const [savingKeys, setSavingKeys] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
+
+  // Whether SmartDoc lets this customer use storage of their own. Null
+  // until read; a customer administrator changes nothing until it is.
+  const [canOwn, setCanOwn] = useState<boolean | null>(null);
+  const mayAdd = isSys || canOwn === true;
+  // A SmartDoc storage is SmartDoc's to change, and a customer's own only
+  // while they are allowed one.
+  const mayChange = (s: StorageRow) =>
+    isSys || (s.storage_provider !== "smartdoc" && canOwn === true);
+  const offered = PROVIDER_OPTIONS.filter((opt) => isSys || !opt.sysOnly);
 
   const filteredStorages = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -210,9 +236,29 @@ export default function Storage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer]);
 
+  useEffect(() => {
+    if (isSys || !customer) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await authService.ensureValidToken();
+        const row = await customerService.getById(customer.customer_id, token);
+        if (!cancelled) setCanOwn(row?.can_add_storage === 1);
+      } catch {
+        // Unknown is treated as not allowed: the list still shows, and the
+        // API is what decides either way.
+        if (!cancelled) setCanOwn(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer?.customer_id, isSys]);
+
   const openCreate = () => {
     setEditingStorage(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, storage_provider: offered[0].value });
     setErrors({});
     setIsFormOpen(true);
   };
@@ -224,8 +270,7 @@ export default function Storage({
       storage_provider: s.storage_provider,
       s3_bucket: s.s3_bucket,
       s3_endpoint: s.s3_endpoint || "",
-      s3_region: s.s3_region,
-      vault_path: s.vault_path,
+      s3_region: s.s3_region || "",
     });
     setErrors({});
     setIsFormOpen(true);
@@ -263,22 +308,17 @@ export default function Storage({
       next.s3_bucket = `Must be ${MAX_BUCKET_CHARS} characters or fewer`;
     }
 
+    // A SmartDoc storage is only a bucket: the rest is SmartDoc's.
+    if (form.storage_provider === "smartdoc") return next;
+
     if (!form.s3_region.trim()) {
-      next.s3_region = "Region is required — both SDKs demand one, even MinIO";
+      next.s3_region = "Region is required — every S3 request is signed with one";
     }
 
     // MinIO has nothing to derive an endpoint from; AWS derives it from the
     // region, and an endpoint there would override it wrongly.
     if (form.storage_provider === "minio" && !endpoint) {
-      next.s3_endpoint = "Required for MinIO — the address of your S3 server";
-    }
-
-    if (!form.vault_path.trim()) {
-      next.vault_path = "Vault folder is required";
-    } else if (!form.vault_path.trim().includes("/data/")) {
-      // The commonest mistake by far: the CLI writes kv/x, the API reads
-      // kv/data/x. Catch it here rather than as a 404 from Vault later.
-      next.vault_path = 'Must include "/data/" — the API reads kv/data/…, even though the CLI writes kv/…';
+      next.s3_endpoint = "Required — the address of your S3-compatible service";
     }
 
     return next;
@@ -300,8 +340,7 @@ export default function Storage({
       // Deliberately null rather than "" for AWS: the SDK treats an empty
       // endpoint as a real one and fails to sign.
       s3_endpoint: form.storage_provider === "minio" ? form.s3_endpoint.trim() : null,
-      s3_region: form.s3_region.trim(),
-      vault_path: form.vault_path.trim(),
+      s3_region: form.storage_provider === "smartdoc" ? null : form.s3_region.trim(),
       is_active: (editingStorage ? editingStorage.is_active : 1) as 0 | 1,
     };
 
@@ -445,9 +484,15 @@ export default function Storage({
               />
             </div>
           </div>
-          <Button size="xs" disabled={!customer} onClick={openCreate}>
-            Add New Storage
-          </Button>
+          {mayAdd ? (
+            <Button size="xs" disabled={!customer} onClick={openCreate}>
+              Add New Storage
+            </Button>
+          ) : canOwn === false ? (
+            <p className="flex-shrink-0 text-sm text-gray-500 dark:text-gray-400">
+              Storage is provided by SmartDoc.
+            </p>
+          ) : null}
         </div>
         {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
       </div>
@@ -496,7 +541,7 @@ export default function Storage({
                       {s.storage_name}
                     </TableCell>
                     <TableCell className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300">
-                      {s.storage_provider === "minio" ? "MinIO" : "Amazon S3"}
+                      {providerShortName(s.storage_provider)}
                     </TableCell>
                     <TableCell className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300">
                       {s.s3_bucket}
@@ -507,7 +552,7 @@ export default function Storage({
                       </span>
                     </TableCell>
                     <TableCell className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300">
-                      {s.s3_region}
+                      {s.s3_region || "—"}
                     </TableCell>
                     <TableCell className="px-4 py-2.5 text-sm">
                       {/* Whether the keys work, not merely whether a secret
@@ -570,6 +615,7 @@ export default function Storage({
                       </div>
                     </TableCell>
                     <TableCell className="px-4 py-2.5 text-sm">
+                      {mayChange(s) && (
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
@@ -605,6 +651,7 @@ export default function Storage({
                           <PencilIcon className="size-4" />
                         </button>
                       </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
@@ -632,48 +679,28 @@ export default function Storage({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="storage_provider">Provider *</Label>
-              <select
-                id="storage_provider"
-                value={form.storage_provider}
-                onChange={(e) =>
-                  setForm({ ...form, storage_provider: e.target.value as StorageProvider })
-                }
-                className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
-              >
-                {PROVIDER_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value} className="dark:bg-gray-900">
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <Label htmlFor="s3_region">Region *</Label>
-              <Input
-                id="s3_region"
-                placeholder="us-east-1"
-                value={form.s3_region}
-                error={!!errors.s3_region}
-                hint={errors.s3_region}
-                onChange={(e) => setForm({ ...form, s3_region: e.target.value })}
-              />
-            </div>
-          </div>
-
           <div>
-            <Label htmlFor="s3_bucket">Bucket *</Label>
-            <Input
-              id="s3_bucket"
-              placeholder="smartdoc"
-              value={form.s3_bucket}
-              error={!!errors.s3_bucket}
-              hint={errors.s3_bucket}
-              onChange={(e) => setForm({ ...form, s3_bucket: e.target.value })}
-            />
+            <Label htmlFor="storage_provider">Provider *</Label>
+            <select
+              id="storage_provider"
+              value={form.storage_provider}
+              onChange={(e) =>
+                setForm({ ...form, storage_provider: e.target.value as StorageProvider })
+              }
+              className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+            >
+              {offered.map((opt) => (
+                <option key={opt.value} value={opt.value} className="dark:bg-gray-900">
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {form.storage_provider === "smartdoc" && (
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                A bucket on SmartDoc's own storage. Make the bucket and its key pair there
+                first; the address and region are SmartDoc's, so only the bucket is asked for.
+              </p>
+            )}
           </div>
 
           {form.storage_provider === "minio" && (
@@ -690,15 +717,50 @@ export default function Storage({
             </div>
           )}
 
+          {form.storage_provider !== "smartdoc" && (
           <div>
-            <Label htmlFor="vault_path">Vault folder *</Label>
+            <Label htmlFor="s3_region">Region *</Label>
             <Input
-              id="vault_path"
-              placeholder={DEFAULT_VAULT_FOLDER}
-              value={form.vault_path}
-              error={!!errors.vault_path}
-              hint={errors.vault_path}
-              onChange={(e) => setForm({ ...form, vault_path: e.target.value })}
+              id="s3_region"
+              placeholder="us-east-1"
+              value={form.s3_region}
+              error={!!errors.s3_region}
+              hint={
+                errors.s3_region ||
+                // Which value is right is the provider's, and the wrong one
+                // is refused at signing with nothing that says so.
+                (form.storage_provider === "minio"
+                  ? "Use the region your provider gives. MinIO accepts any value (us-east-1); Cloudflare R2 uses auto."
+                  : undefined)
+              }
+              onChange={(e) => setForm({ ...form, s3_region: e.target.value })}
+            />
+            {/* Shown, never stored: kept empty on the row so the address and
+                the region cannot disagree — the SDK builds it from the region
+                every time. This only says where that will be. */}
+            {form.storage_provider === "aws" && (
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                Address:{" "}
+                <span className="font-mono text-gray-700 dark:text-gray-300">
+                  {form.s3_region.trim()
+                    ? `https://s3.${form.s3_region.trim()}.amazonaws.com`
+                    : "https://s3.<region>.amazonaws.com"}
+                </span>{" "}
+                — worked out from the region
+              </p>
+            )}
+          </div>
+          )}
+
+          <div>
+            <Label htmlFor="s3_bucket">Bucket *</Label>
+            <Input
+              id="s3_bucket"
+              placeholder="smartdoc"
+              value={form.s3_bucket}
+              error={!!errors.s3_bucket}
+              hint={errors.s3_bucket}
+              onChange={(e) => setForm({ ...form, s3_bucket: e.target.value })}
             />
           </div>
 

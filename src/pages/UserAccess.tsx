@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import PageMeta from "../components/common/PageMeta";
 import Button from "../components/ui/button/Button";
@@ -222,10 +222,82 @@ export default function UserAccess() {
     else navigate(back);
   };
 
-  const save = async () => {
+  /**
+   * **Every way out asks, not only Back.** The menu, the breadcrumb, the
+   * browser's Back and closing the tab all used to leave without a word,
+   * and the changes went with them.
+   *
+   * The router here has no blocking of its own (it is the plain
+   * `BrowserRouter`), so this screen does it while something is unsaved:
+   * - a link anywhere on the page is caught before it is followed, and the
+   *   question is asked with that link as where "Leave" goes;
+   * - Back: one extra step is kept on this page, so pressing Back lands here
+   *   first and asks; leaving then takes both steps back;
+   * - closing or reloading the tab gets the browser's own question.
+   *
+   * Once the changes are saved or undone, the extra step is taken off again,
+   * so Back goes where it always did.
+   */
+  const dirty = changed.length > 0;
+  // Where leaving goes when a link or Back asked; empty means the Users list.
+  const leaveTo = useRef<(() => void) | null>(null);
+  // Set the moment somebody chooses to leave, so nothing here holds them back.
+  const leavingOnPurpose = useRef(false);
+
+  const leave = () => {
+    leavingOnPurpose.current = true;
+    setLeaving(false);
+    const go = leaveTo.current ?? (() => navigate(back));
+    leaveTo.current = null;
+    go();
+  };
+
+  useEffect(() => {
+    if (!dirty) return;
+    leavingOnPurpose.current = false;
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link || link.target === "_blank") return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
+      event.preventDefault();
+      event.stopPropagation();
+      leaveTo.current = () => navigate(url.pathname + url.search + url.hash);
+      setLeaving(true);
+    };
+    window.history.pushState(window.history.state, "", window.location.href);
+    const onPopState = () => {
+      if (leavingOnPurpose.current) return;
+      window.history.pushState(window.history.state, "", window.location.href);
+      leaveTo.current = () => window.history.go(-2);
+      setLeaving(true);
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+      window.removeEventListener("popstate", onPopState);
+      if (!leavingOnPurpose.current) window.history.back();
+    };
+    // Only on becoming unsaved and saved again, not on every edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty]);
+
+  /** Saves every changed row; says whether it worked (a failure has shown its message). */
+  const save = async (): Promise<boolean> => {
     // The customer as well as the person: reading the memberships back is
     // a customer-scoped call, and there is no unscoped one to fall back to.
-    if (changed.length === 0 || !userId || !customer) return;
+    if (changed.length === 0 || !userId || !customer) return changed.length === 0;
 
     setSaving(true);
     try {
@@ -308,11 +380,13 @@ export default function UserAccess() {
       setRows(fresh);
       setAsLoaded(fresh);
       setToast({ message: "Access saved", type: "success" });
+      return true;
     } catch (err) {
       setToast({
         message: err instanceof Error ? err.message : "Could not save",
         type: "error",
       });
+      return false;
     } finally {
       setSaving(false);
     }
@@ -513,22 +587,35 @@ export default function UserAccess() {
         </p>
 
         <div className="flex justify-end gap-3">
-          <Button size="xs" variant="outline" onClick={() => setLeaving(false)}>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => {
+              leaveTo.current = null;
+              setLeaving(false);
+            }}
+          >
             Stay
           </Button>
           <Button
             size="xs"
             onClick={async () => {
               setLeaving(false);
-              await save();
-              navigate(back);
+              // Leaving only once the save worked: it used to go whatever
+              // the answer, and a refused save lost the changes with the
+              // error gone with the page. Marked first, because a save that
+              // works clears the changes, and that must not be taken for
+              // staying.
+              leavingOnPurpose.current = true;
+              if (await save()) leave();
+              else leavingOnPurpose.current = false;
             }}
           >
             Save and leave
           </Button>
           <button
             type="button"
-            onClick={() => navigate(back)}
+            onClick={leave}
             className="text-sm text-gray-500 underline-offset-2 transition hover:text-error-500 hover:underline dark:text-gray-400"
           >
             Leave

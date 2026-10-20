@@ -129,6 +129,20 @@ export default function Users({
     const head = `At least ${passwordRules.minLength} characters`;
     return parts.length === 0 ? `${head}.` : `${head}, including ${parts.join(", ")}.`;
   }, [passwordRules]);
+
+  // A typed temporary password against the same rules the dialog states.
+  // It was checked for 8 characters whatever the customer asked, so a
+  // short one was accepted here and refused by the server a moment later
+  // (bug #14). The generated one always meets them.
+  const resetChecks = (value: string) => {
+    const list = [
+      { text: `At least ${passwordRules.minLength} characters`, met: value.length >= passwordRules.minLength },
+    ];
+    if (passwordRules.needsDigit) list.push({ text: "A number", met: /[0-9]/.test(value) });
+    if (passwordRules.needsCapital) list.push({ text: "A capital letter", met: /[A-Z]/.test(value) });
+    if (passwordRules.needsSymbol) list.push({ text: "A symbol", met: /[^A-Za-z0-9]/.test(value) });
+    return list;
+  };
   // Held steady: built fresh on every render it was a new object each time,
   // so every effect that depends on it ran again, which fetched, which
   // rendered — the screen flickered and the network tab filled up.
@@ -352,32 +366,13 @@ export default function Users({
     setTogglingUserId(u.user_id);
     try {
       const token = await authService.ensureValidToken();
-
-      // Step 1: sync Keycloak's enabled flag, if this user has a linked
-      // keycloak_id (legacy rows created before that column existed won't).
-      if (u.keycloak_id) {
-        try {
-          await userManagementService.setKeycloakUserStatus(u.keycloak_id, nextActive === 1, token);
-        } catch (err) {
-          setToast({
-            message: `Failed to update Keycloak status: ${err instanceof Error ? err.message : "Unknown error"}`,
-            type: "error",
-          });
-          return;
-        }
-      }
-
-      // Step 2: persist is_active in smartdoc_api's DB. If this fails after
-      // step 1 succeeded, Keycloak and the DB are now out of sync — surface
-      // that clearly rather than leaving it silent (same pattern as user
-      // creation, since there's no automatic rollback here either).
+      // One call: smartdoc_api changes the sign-in account and the record
+      // together, and says so if only one of them could be changed.
       try {
-        await userManagementService.updateUser(u.user_id, u.username, customer.customer_id, nextActive, token);
+        await userManagementService.setUserActive(u.user_id, nextActive === 1, token);
       } catch (err) {
         setToast({
-          message: `Keycloak was updated but the database record failed (${
-            err instanceof Error ? err.message : "unknown error"
-          }). "${short(u.username)}" is now out of sync between Keycloak and the database.`,
+          message: err instanceof Error ? err.message : "Failed to change the account",
           type: "error",
         });
         return;
@@ -410,13 +405,12 @@ export default function Users({
   };
 
   const doReset = async () => {
-    const keycloakId = resetFor?.keycloak_id ?? detailsFor(resetFor!)?.id;
-    if (!resetFor || !keycloakId || resetPassword.length < 8) return;
+    if (!resetFor || !resetChecks(resetPassword).every((r) => r.met)) return;
 
     setResetting(true);
     try {
       const token = await authService.ensureValidToken();
-      await userManagementService.setPassword(keycloakId, resetPassword, token);
+      await userManagementService.setPassword(resetFor.user_id, resetPassword, token);
       setToast({
         message: `Password set. ${short(resetFor.username)} must choose their own at the next sign-in.`,
         type: "success",
@@ -1198,6 +1192,21 @@ export default function Users({
             Generate another
           </button>
 
+          {/* Only what is still missing, so a generated password — which
+              meets every rule — shows nothing extra. */}
+          {resetPassword.length > 0 && resetChecks(resetPassword).some((r) => !r.met) && (
+            <ul className="mt-2 space-y-1 rounded-lg bg-gray-50 p-2.5 dark:bg-white/[0.03]">
+              {resetChecks(resetPassword)
+                .filter((rule) => !rule.met)
+                .map((rule) => (
+                  <li key={rule.text} className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <span className="w-3 text-center">•</span>
+                    {rule.text}
+                  </li>
+                ))}
+            </ul>
+          )}
+
           <div className="mt-5 flex justify-end gap-3">
             <Button size="xs" type="button" variant="outline" onClick={() => setResetFor(null)}>
               Cancel
@@ -1205,7 +1214,7 @@ export default function Users({
             <Button
               size="xs"
               type="button"
-              disabled={resetting || resetPassword.length < 8}
+              disabled={resetting || !resetChecks(resetPassword).every((r) => r.met)}
               onClick={doReset}
             >
               {resetting ? "Setting..." : "Set password"}

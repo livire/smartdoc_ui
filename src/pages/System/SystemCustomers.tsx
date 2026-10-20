@@ -6,7 +6,7 @@ import Button from "../../components/ui/button/Button";
 import Label from "../../components/form/Label";
 import Input from "../../components/form/input/InputField";
 import { authService } from "../../services/authService";
-import { customerService, CustomerSummary } from "../../services/customerService";
+import { customerService, CustomerSummary, cleanCustomerUrl, customerUrlProblem } from "../../services/customerService";
 import CustomerPane from "./CustomerPane";
 import { ArrowRightIcon } from "../../icons";
 
@@ -85,7 +85,7 @@ export default function SystemCustomers() {
 
   const createCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newUrl.trim()) return;
+    if (!newName.trim() || !newUrl.trim() || customerUrlProblem(newUrl)) return;
 
     setCreating(true);
     try {
@@ -95,7 +95,7 @@ export default function SystemCustomers() {
           customer_name: newName.trim(),
           // The address its people will sign in at, so it has to be the
           // shape of a url segment rather than whatever was typed.
-          customer_url: newUrl.trim().toLowerCase().replace(/[^a-z0-9-]/g, ""),
+          customer_url: cleanCustomerUrl(newUrl),
           allowed_projects: Number(newAllowed) || 1,
         },
         token,
@@ -246,11 +246,15 @@ export default function SystemCustomers() {
               value={newUrl}
               onChange={(e) => setNewUrl(e.target.value)}
               placeholder="company"
+              error={Boolean(customerUrlProblem(newUrl))}
+              hint={customerUrlProblem(newUrl) ?? undefined}
             />
-            <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-              Their people will sign in at /{newUrl.trim().toLowerCase().replace(/[^a-z0-9-]/g, "") || "name"}.
-              Letters, numbers and hyphens.
-            </p>
+            {!customerUrlProblem(newUrl) && (
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                Their people will sign in at /{cleanCustomerUrl(newUrl) || "name"}.
+                Letters, numbers and hyphens.
+              </p>
+            )}
           </div>
           <div>
             <Label htmlFor="customer-projects">Projects allowed</Label>
@@ -265,7 +269,7 @@ export default function SystemCustomers() {
             <Button size="xs" type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
               Cancel
             </Button>
-            <Button size="xs" type="submit" disabled={creating}>
+            <Button size="xs" type="submit" disabled={creating || Boolean(customerUrlProblem(newUrl))}>
               {creating ? "Creating..." : "Create"}
             </Button>
           </div>

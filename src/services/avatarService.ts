@@ -61,6 +61,18 @@ export async function prepareAvatar(file: File): Promise<{ dataUrl: string; cont
   }
 }
 
+/**
+ * Said on the page whenever somebody's picture is saved or removed, with
+ * the new picture (or null). The header shows the same picture as the
+ * profile screen and read it only once, so a change showed there only
+ * after a reload (bug #33).
+ */
+export const AVATAR_CHANGED = "smartdoc:avatar-changed";
+export type AvatarChange = { userId: number; dataUrl: string | null };
+
+const announce = (change: AvatarChange) =>
+  window.dispatchEvent(new CustomEvent<AvatarChange>(AVATAR_CHANGED, { detail: change }));
+
 export const avatarService = {
   async get(userId: number, accessToken: string): Promise<string | null> {
     const response = await fetch(`${API_URL}/user_avatar/${userId}`, {
@@ -78,6 +90,7 @@ export const avatarService = {
       body: JSON.stringify({ user_id: userId, image_data: dataUrl, content_type: contentType }),
     });
     if (!response.ok) throw new Error("Failed to save the picture");
+    announce({ userId, dataUrl });
   },
 
   async remove(userId: number, accessToken: string) {
@@ -86,5 +99,6 @@ export const avatarService = {
       headers: jsonHeaders(accessToken),
     });
     if (!response.ok) throw new Error("Failed to remove the picture");
+    announce({ userId, dataUrl: null });
   },
 };

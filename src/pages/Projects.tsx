@@ -30,6 +30,7 @@ import { storageService } from "../services/storageService";
 import type { Storage as StorageRow } from "../services/storageService";
 import { projectSettingService } from "../services/projectSettingService";
 import type { ProjectSetting } from "../services/projectSettingService";
+import { providerShortName } from "../services/storageService";
 
 const emptyNewProject = {
   project_name: "",
@@ -1092,8 +1093,9 @@ export default function Projects() {
 
                       {selectedStorage ? (
                         <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                          {selectedStorage.storage_provider === "minio" ? "MinIO" : "Amazon S3"} ·{" "}
-                          {selectedStorage.s3_bucket} · {selectedStorage.s3_region}
+                          {providerShortName(selectedStorage.storage_provider)} ·{" "}
+                          {selectedStorage.s3_bucket}
+                          {selectedStorage.s3_region ? ` · ${selectedStorage.s3_region}` : ""}
                           {selectedStorage.s3_endpoint ? ` · ${selectedStorage.s3_endpoint}` : ""}
                         </p>
                       ) : storages.length === 0 ? (

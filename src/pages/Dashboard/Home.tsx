@@ -163,21 +163,9 @@ export default function Home() {
           token,
         );
         setQueueHealth(queue);
-        const heldCapture = new Set(
-          mine
-            .filter((m) => m.my_stage.stage_type !== VERIFY_STAGE)
-            .map((m) => String(m.assignment_id)),
-        );
-        const visible = membership.can_setup
-          ? letters
-          : letters.filter((m) => heldCapture.has(String(m.assignmentId)));
-        setStuck(visible);
-        await resolveIdentifiers(
-          visible
-            .filter((m) => m.identifierId !== null)
-            .map((m) => ({ identifier_id: Number(m.identifierId) })),
-          token,
-        );
+        // Kept whole; whether to say anything is decided when drawing, once
+        // the role is known (the notice is an admin's — see below).
+        setStuck(letters);
       } catch {
         setStuck([]);
       }
@@ -238,8 +226,12 @@ export default function Home() {
             on. Not a box here any more (a box that said "nothing" most days
             earned no glance) but a notice when there is something, leading
             to its own screen. Never dismissable: it clears when the queue
-            does. */}
-        {!loading && (stuck.length > 0 || (queueHealth && queueHealth.consumers === 0 && queueHealth.waiting > 0)) && (
+            does.
+            A project admin's only, like the screen it leads to: a worker's
+            own stuck documents are on Digitize. Decided here at drawing time
+            rather than when the queue was read, because on a cold load the
+            role arrives after the queue does. */}
+        {!loading && membership.can_setup && (stuck.length > 0 || (queueHealth && queueHealth.consumers === 0 && queueHealth.waiting > 0)) && (
           <Link
             to={`/${customer?.customer_url ?? storedCustomerUrl() ?? ""}/not-recorded`}
             title="Open the list"
@@ -459,7 +451,12 @@ export default function Home() {
             )}
           </Panel>
 
-          {/* Available to verify — the queue itself */}
+          {/* Available to verify — the queue itself. Only for somebody who
+              can verify on this project: a Viewer reads finished documents and
+              verifies nothing, so the panel offered them work the server
+              would refuse (decided 2026-10-19, #24). Checked as it is drawn,
+              so it appears once the role is known. */}
+          {membership.can_verify && (
           <Panel
             title="Available to Verify"
             count={available.length}
@@ -502,6 +499,7 @@ export default function Home() {
               </tr>
             ))}
           </Panel>
+          )}
 
         </div>
       </div>
