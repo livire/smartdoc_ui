@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import PageMeta from "../../components/common/PageMeta";
 import Badge from "../../components/ui/badge/Badge";
 import Button from "../../components/ui/button/Button";
@@ -101,7 +101,21 @@ export default function Home() {
   const [autoRefreshOn, setAutoRefreshOn] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(60);
   const [lastLoaded, setLastLoaded] = useState<Date | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+  // A message handed over by the screen that sent somebody here — Verify,
+  // after a batch is completed or sent back. Shown once: the address's
+  // state is cleared so a reload does not say it again.
+  const location = useLocation();
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(() => {
+    const notice = (location.state as { notice?: string } | null)?.notice;
+    return notice ? { message: notice, type: "success" } : null;
+  });
+  useEffect(() => {
+    if ((location.state as { notice?: string } | null)?.notice) {
+      window.history.replaceState({}, "");
+    }
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const identifierOf = (id: number) => identifierValues.get(String(id)) || `#${id}`;

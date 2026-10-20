@@ -608,16 +608,16 @@ export default function VerifyBatch() {
     try {
       const token = await authService.ensureValidToken();
       await assignmentStageService.transition(id, event, token, note);
-      setToast({
-        message:
-          event === "COMPLETE_VERIFY"
-            ? "Batch verified"
-            : event === "RELEASE_VERIFY"
-            ? "Returned to the queue for anyone to pick up"
-            : "Batch sent back for correction",
-        type: "success",
-      });
-      navigate(`/${customer?.customer_url ?? storedCustomerUrl() ?? ""}`);
+      // Carried to the dashboard and said there. Set here, it belonged to
+      // this screen, which is left on the next line — so "Batch verified"
+      // and "Batch sent back for correction" were never seen (2026-10-20).
+      const notice =
+        event === "COMPLETE_VERIFY"
+          ? "Batch verified"
+          : event === "RELEASE_VERIFY"
+          ? "Returned to the queue for anyone to pick up"
+          : "Batch sent back for correction";
+      navigate(`/${customer?.customer_url ?? storedCustomerUrl() ?? ""}`, { state: { notice } });
     } catch (err) {
       setToast({
         message: err instanceof Error ? err.message : "Failed to finish the verification",
