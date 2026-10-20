@@ -37,7 +37,6 @@ export default function SystemCustomers() {
   // reload of the list keeps the choice.
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  /** Reads the list; answers it too, so a caller can act on what came back. */
   const load = async () => {
     setLoading(true);
     setError(null);
@@ -52,10 +51,8 @@ export default function SystemCustomers() {
           ? current
           : rows[0]?.customer_id ?? null,
       );
-      return rows;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to read the customers");
-      return null;
     } finally {
       setLoading(false);
     }
@@ -93,7 +90,7 @@ export default function SystemCustomers() {
     setCreating(true);
     try {
       const token = await authService.ensureValidToken();
-      await customerService.createCustomer(
+      const created = await customerService.createCustomer(
         {
           customer_name: newName.trim(),
           // The address its people will sign in at, so it has to be the
@@ -107,13 +104,11 @@ export default function SystemCustomers() {
       setIsCreateOpen(false);
       setNewName("");
       setNewUrl("");
-      const before = new Set(customers.map((c) => c.customer_id));
-      // Whichever row is new: the point of creating one is to set it up.
-      // Picked from what `load` answers: it was picked inside a
-      // setCustomers updater, and that selection never took.
-      const rows = await load();
-      const fresh = rows?.find((c) => !before.has(c.customer_id));
-      if (fresh) setSelectedId(fresh.customer_id);
+      // The new one is opened: the point of creating it is to set it up.
+      // By the id the server answered — it was worked out by comparing the
+      // list before and after, and that never selected it.
+      await load();
+      if (created?.customer_id) setSelectedId(created.customer_id);
     } catch (err) {
       setToast({
         message: err instanceof Error ? err.message : "Failed to create the customer",

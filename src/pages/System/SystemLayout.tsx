@@ -23,15 +23,20 @@ const SYSTEM_MENU = [
 ];
 
 export default function SystemLayout() {
-  const { isAuthenticated, logout, user } = useAuth();
+  const { isAuthenticated, isLoading, logout, user } = useAuth();
   const { account, accountLoading } = useMembership();
-
-  if (!isAuthenticated) return <Navigate to="/sys" replace />;
 
   // Nothing is decided until the server has said who this is. Drawing the
   // screens first and correcting afterwards is how a customer's own user
   // got a glimpse of screens that were never theirs.
-  if (accountLoading) {
+  //
+  // That includes whether anybody is signed in at all. On a fresh load the
+  // stored session has not been read yet, so "not signed in" was decided
+  // first: the /sys form took over, saw the session, and sent every
+  // reloaded /sys page to Customers (2026-10-20).
+  if (!isLoading && !isAuthenticated) return <Navigate to="/sys" replace />;
+
+  if (isLoading || accountLoading) {
     return (
       <AuthLayout>
         <div className="flex flex-1 items-center justify-center">
