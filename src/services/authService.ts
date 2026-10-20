@@ -1,4 +1,4 @@
-import { requireReauth } from "./sessionExpiry";
+import { requireReauth, LOCK_WINDOW_MS } from "./sessionExpiry";
 import { forgetAll } from "./cache";
 import { companyLogin } from "./companyLogin";
 
@@ -555,6 +555,14 @@ export const authService = {
       try {
         await this.refreshToken();
       } catch {
+        // Long gone — the next morning, say: nothing on screen is worth
+        // keeping, so the sign-in page, as the fetch guard already does
+        // (sessionGuard.ts). This path asked for the password however old
+        // the session was (2026-10-20).
+        if (this.msUntilExpiry() < -LOCK_WINDOW_MS) {
+          this.sessionExpired();
+          throw new Error("Your session has expired. Please sign in again.");
+        }
         // Ask for the password and hold on until it is given, so whatever
         // the screen was doing continues instead of collapsing into an
         // empty state.
