@@ -37,6 +37,7 @@ export default function SystemCustomers() {
   // reload of the list keeps the choice.
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  /** Reads the list; answers it too, so a caller can act on what came back. */
   const load = async () => {
     setLoading(true);
     setError(null);
@@ -51,8 +52,10 @@ export default function SystemCustomers() {
           ? current
           : rows[0]?.customer_id ?? null,
       );
+      return rows;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to read the customers");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -105,13 +108,12 @@ export default function SystemCustomers() {
       setNewName("");
       setNewUrl("");
       const before = new Set(customers.map((c) => c.customer_id));
-      await load();
       // Whichever row is new: the point of creating one is to set it up.
-      setCustomers((rows) => {
-        const fresh = rows.find((c) => !before.has(c.customer_id));
-        if (fresh) setSelectedId(fresh.customer_id);
-        return rows;
-      });
+      // Picked from what `load` answers: it was picked inside a
+      // setCustomers updater, and that selection never took.
+      const rows = await load();
+      const fresh = rows?.find((c) => !before.has(c.customer_id));
+      if (fresh) setSelectedId(fresh.customer_id);
     } catch (err) {
       setToast({
         message: err instanceof Error ? err.message : "Failed to create the customer",
@@ -269,7 +271,13 @@ export default function SystemCustomers() {
             <Button size="xs" type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
               Cancel
             </Button>
-            <Button size="xs" type="submit" disabled={creating || Boolean(customerUrlProblem(newUrl))}>
+            <Button
+              size="xs"
+              type="submit"
+              // Off until both are filled: pressing it with either empty did
+              // nothing and said nothing.
+              disabled={creating || !newName.trim() || !newUrl.trim() || Boolean(customerUrlProblem(newUrl))}
+            >
               {creating ? "Creating..." : "Create"}
             </Button>
           </div>

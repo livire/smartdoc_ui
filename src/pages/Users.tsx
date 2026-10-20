@@ -11,7 +11,7 @@ import { PencilIcon, LockIcon } from "../icons";
 import { useCustomer } from "../context/CustomerContext";
 import { qualify, strip } from "../services/usernameRules";
 import { customerService } from "../services/customerService";
-import { Role } from "../context/MembershipContext";
+import { Role, useMembership } from "../context/MembershipContext";
 import { authService, UserProject } from "../services/authService";
 import {
   userManagementService,
@@ -174,6 +174,12 @@ export default function Users({
         : contextCustomer,
     [contextCustomer, customerId],
   );
+
+  // The signed-in person. They may not switch themselves off or take away
+  // their own administrator role: nobody else in the customer could undo
+  // either. The server refuses both too. Null on /sys, where nobody here is them.
+  const { account } = useMembership();
+  const isMe = (u: AppUser | null) => account.user_id != null && u != null && account.user_id === u.user_id;
 
   const [users, setUsers] = useState<AppUser[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -767,8 +773,14 @@ export default function Users({
                             type="button"
                             role="switch"
                             aria-checked={isEnabled}
-                            title={isEnabled ? "Can sign in — click to disable" : "Cannot sign in — click to enable"}
-                            disabled={togglingUserId === u.user_id}
+                            title={
+                              isMe(u) && isEnabled
+                                ? "You cannot disable your own account"
+                                : isEnabled
+                                  ? "Can sign in — click to disable"
+                                  : "Cannot sign in — click to enable"
+                            }
+                            disabled={togglingUserId === u.user_id || (isMe(u) && isEnabled)}
                             onClick={(e) => {
                               e.stopPropagation();
                               toggleActive(u);
@@ -1077,14 +1089,16 @@ export default function Users({
                 Customer Administrator
               </span>
               <span className="block text-xs text-gray-500 dark:text-gray-400">
-                Sets up projects, storage, users and branding for the whole customer, with no
-                project open. Project roles are separate.
+                {isMe(selectedUser) && selectedUser?.role_id === CUSTOMER_ADMIN_ROLE
+                  ? "You cannot remove this from yourself. Another customer administrator has to."
+                  : "Sets up projects, storage, users and branding for the whole customer, with no project open. Project roles are separate."}
               </span>
             </span>
 
             <button
               type="button"
               role="switch"
+              disabled={isMe(selectedUser) && selectedUser?.role_id === CUSTOMER_ADMIN_ROLE}
               aria-checked={editCustomerRoleId === String(CUSTOMER_ADMIN_ROLE)}
               onClick={() =>
                 setEditCustomerRoleId((current) =>
