@@ -462,12 +462,25 @@ export default function Projects() {
     }
   };
 
+  // A name this customer already uses on another project. Names are unique
+  // per customer; the server refuses a clash too, this says so first.
+  const nameTaken = (name: string, exceptId?: number) =>
+    projects.some(
+      (p) =>
+        p.project_name.trim().toLowerCase() === name.trim().toLowerCase() &&
+        p.project_id !== exceptId,
+    );
+
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customer) return;
 
     if (!newProject.project_name.trim() || !newProject.identifier_label.trim()) {
       setToast({ message: "Project name and identifier label are required", type: "error" });
+      return;
+    }
+    if (nameTaken(newProject.project_name)) {
+      setToast({ message: `There is already a project called "${newProject.project_name.trim()}"`, type: "error" });
       return;
     }
 
@@ -508,6 +521,11 @@ export default function Projects() {
 
     if (!form.project_name.trim() || !form.identifier_label.trim()) {
       setToast({ message: "Project name and identifier label are required", type: "error" });
+      return;
+    }
+
+    if (nameTaken(form.project_name, selectedProject.project_id)) {
+      setToast({ message: `There is already a project called "${form.project_name.trim()}"`, type: "error" });
       return;
     }
 
