@@ -317,11 +317,10 @@ export default function Users({
         if (back) setSelectedUser(back);
       }
 
-      // Fetched separately and allowed to fail: it needs `view-users` in
-      // Keycloak, which not every project admin has. Losing it costs the
-      // name and email columns, nothing else.
+      // Fetched separately and allowed to fail: losing it costs the name and
+      // email columns, nothing else.
       try {
-        setKeycloakUsers(await userManagementService.getKeycloakUsers(token));
+        setKeycloakUsers(await userManagementService.getKeycloakUsers(customer.customer_id, token));
         setDetailsUnavailable(null);
       } catch (detailErr) {
         setKeycloakUsers([]);
@@ -613,8 +612,8 @@ export default function Users({
         {error && <Toast message={error} type="error" onClose={() => setError(null)} />}
         {detailsUnavailable && (
           <p className="mt-2 text-xs text-warning-500">
-            Names and emails can't be shown — your account needs Keycloak's "view-users" permission.
-            Everything else on this screen works.
+            Names and emails can't be shown right now ({detailsUnavailable}). Everything else on
+            this screen works.
           </p>
         )}
       </div>

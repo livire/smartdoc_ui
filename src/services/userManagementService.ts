@@ -2,7 +2,6 @@ import { UserProject } from "./authService";
 import { cached, forget, FOREVER } from "./cache";
 
 const API_URL = import.meta.env.VITE_API_URL;
-const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL;
 
 export interface AppUser {
   user_id: number;
@@ -94,13 +93,13 @@ const KEY = {
   users: (customerId: number) => `users:${customerId}`,
   projects: (customerId: number) => `projects:${customerId}`,
   memberships: (customerId: number) => `memberships:${customerId}`,
-  keycloak: "keycloak-users",
+  keycloak: (customerId: number) => `keycloak-users:${customerId}`,
 };
 
 /** What changed about people: the app's rows and Keycloak's copy of them. */
 const forgetPeople = () => {
   forget("users");
-  forget(KEY.keycloak);
+  forget("keycloak-users");
 };
 
 export const userManagementService = {
@@ -167,17 +166,16 @@ export const userManagementService = {
   // Keycloak's copy of a user: email and real name live there, not in the
   // app's `user` table, which holds only username / customer / status.
   //
-  // Uses the caller's own token — auth_api has no privileged service account
-  // for this — so an admin without `view-users` gets a 403. The screen treats
-  // that as "names unavailable" rather than a failure, since usernames and
-  // project assignments still work without it.
-  async getKeycloakUsers(accessToken: string, max = 500): Promise<KeycloakUser[]> {
-    // The heaviest of the four — every account in the realm, up to 500 — and
-    // the one that was fetched most often. Held per tab; the writes that
-    // change it (creating a person, enabling or disabling one) clear it.
-    return cached(KEY.keycloak, FOREVER, async () => {
-      const response = await fetch(`${AUTH_API_URL}/all_users?max=${max}`, {
-        method: "POST",
+  // The server reads them as itself and sends this customer's people only.
+  // This used to ask the sign-in service for every account in the realm with
+  // the administrator's own token and keep the ones it recognised, so every
+  // other customer's names and emails reached this browser (2026-10-20).
+  async getKeycloakUsers(customerId: number, accessToken: string): Promise<KeycloakUser[]> {
+    // Held per tab; the writes that change it (creating a person, enabling
+    // or disabling one) clear it.
+    return cached(KEY.keycloak(customerId), FOREVER, async () => {
+      const response = await fetch(`${API_URL}/user/customer/${customerId}/accounts`, {
+        method: "GET",
         headers: jsonHeaders(accessToken),
       });
 
@@ -186,10 +184,9 @@ export const userManagementService = {
       }
 
       const body = await response.json();
-      return (body.data?.users || []) as KeycloakUser[];
+      return (body.data || []) as KeycloakUser[];
     });
   },
-
   /**
    * Every membership inside one customer.
    *

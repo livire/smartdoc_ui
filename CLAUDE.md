@@ -149,9 +149,11 @@ moved).
 
 ## Users screen: two sources, one list
 The app's `user` table holds only username, customer and status. **Email and
-real name live in Keycloak**, fetched via `auth_api`'s `POST /all_users` with
-the caller's own token — so an admin without `view-users` gets a 403. That call
-is deliberately allowed to fail: the screen shows a warning and drops the name
+real name live in Keycloak**, fetched via `smartdoc_api`'s
+`GET /user/customer/:id/accounts`, which reads Keycloak as itself and answers
+that customer's people only (2026-10-20). It used to be `auth_api`'s
+`POST /all_users` with the admin's own token, which sent every customer's
+names and emails to the browser. That call is deliberately allowed to fail: the screen shows a warning and drops the name
 and email columns rather than failing to load.
 
 Rows are matched on `keycloak_id`, falling back to username for legacy rows
@@ -436,7 +438,8 @@ the same moment make one request between them.
 
 Four reads go through it, all until sign-out: the customer's users, its
 projects, its memberships, and Keycloak's copy of the accounts
-(`all_users?max=500`, the heavy one). Ten screens call
+(`/user/customer/:id/accounts`, one copy per customer, so a system
+administrator moving between customers is never shown the last one's). Ten screens call
 `getProjectsByCustomer` and each used to fetch it again — the Users screen
 alone cost four lists, then all four again on the way back from User Access.
 
