@@ -1,5 +1,5 @@
 import { authService } from "./authService";
-import { LOCK_WINDOW_MS, requireReauth } from "./sessionExpiry";
+import { LOCK_WINDOW_MS, requireReauth, isSessionLocked } from "./sessionExpiry";
 
 // Signing in and refreshing must be exempt: a 401 from those is "wrong
 // password" or "your refresh token has expired", which the calling code
@@ -24,6 +24,13 @@ function recoverSession(): Promise<string | null> {
 }
 
 async function attemptRecovery(): Promise<string | null> {
+  // Already asking for the password (the idle timeout, say): no quiet
+  // renewal behind it — that is what kept an idle session alive.
+  if (isSessionLocked()) {
+    const signedBackIn = await requireReauth();
+    return signedBackIn ? authService.getStoredToken() : null;
+  }
+
   // The access token may simply have aged out while the refresh token is
   // still good — worth one quiet attempt before troubling anyone.
   try {

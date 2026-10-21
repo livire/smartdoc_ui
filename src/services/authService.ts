@@ -1,4 +1,4 @@
-import { requireReauth, LOCK_WINDOW_MS } from "./sessionExpiry";
+import { requireReauth, isSessionLocked, LOCK_WINDOW_MS } from "./sessionExpiry";
 import { forgetAll } from "./cache";
 import { companyLogin } from "./companyLogin";
 
@@ -549,6 +549,17 @@ export const authService = {
       // was cleared in another tab.
       this.sessionExpired();
       throw new Error("Your session has expired. Please sign in again.");
+    }
+
+    // **Nothing renews behind the password prompt.** It is up because
+    // nobody has been here for the customer's idle timeout; renewing the
+    // token for the bell's two-minute poll kept that session alive for as
+    // long as the tab stayed open, with the prompt only covering the screen
+    // (2026-10-21). Whatever asks now waits for the password.
+    if (isSessionLocked()) {
+      const signedBackIn = await requireReauth();
+      if (!signedBackIn) throw new Error("Your session has expired. Please sign in again.");
+      return this.getStoredToken() || "";
     }
 
     if (this.isTokenExpired()) {
