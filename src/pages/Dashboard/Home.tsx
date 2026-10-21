@@ -72,7 +72,7 @@ export default function Home() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { project } = useProject();
-  const { membership } = useMembership();
+  const { membership, loading: membershipLoading } = useMembership();
   const { customer } = useCustomer();
   // Every screen lives under the customer's url; a bare "/digitize" is
   // read as a customer called "digitize".
@@ -152,7 +152,11 @@ export default function Home() {
       const [mine, recentRows, queue] = await Promise.all([
         assignmentStageService.getMyWork(project.project_id, token),
         assignmentStageService.getMyRecentWork(project.project_id, recentDays, token),
-        assignmentStageService.getVerifyQueue(project.project_id, token),
+        // Only somebody who can verify here is shown the queue, and the
+        // server now refuses it to anybody else.
+        membership.can_verify
+          ? assignmentStageService.getVerifyQueue(project.project_id, token)
+          : Promise.resolve([]),
       ]);
 
       const held = mine.filter((m) => m.my_stage.stage_type === VERIFY_STAGE);
@@ -191,10 +195,12 @@ export default function Home() {
     }
   };
 
+  // After the membership answer: whether the queue is asked for depends on it.
   useEffect(() => {
+    if (membershipLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, user?.user_id, recentDays]);
+  }, [project, user?.user_id, recentDays, membershipLoading, membership.can_verify]);
 
   useEffect(() => {
     if (!autoRefreshOn) return;

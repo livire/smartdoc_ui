@@ -97,7 +97,7 @@ const MembershipContext = createContext<MembershipContextValue>({
  */
 export function MembershipProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const { project } = useProject();
+  const { project, clearProject } = useProject();
   const [membership, setMembership] = useState<Membership>(NO_ACCESS);
   const [loading, setLoading] = useState(true);
   // What the browser already knows, so the first render is right rather
@@ -198,7 +198,18 @@ export function MembershipProvider({ children }: { children: ReactNode }) {
         );
         if (!response.ok) throw new Error("failed to resolve membership");
         const body = await response.json();
-        if (!cancelled) setMembership(body.data || NO_ACCESS);
+        if (cancelled) return;
+        const answer: Membership = body.data || NO_ACCESS;
+        // **A project they are no longer on is forgotten.** The browser keeps
+        // the last project chosen; somebody taken off it since still had its
+        // dashboard on the next visit, with its lists (2026-10-21). The
+        // server's answer is what decides, and with no project the app asks
+        // them to choose again.
+        if (body.data && !answer.is_member && !answer.can_setup) {
+          clearProject();
+          return;
+        }
+        setMembership(answer);
       } catch {
         if (!cancelled) setMembership(NO_ACCESS);
       } finally {
