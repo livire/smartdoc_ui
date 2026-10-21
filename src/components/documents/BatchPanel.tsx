@@ -372,7 +372,11 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
   // URLs nobody looks at.
   const PAGE_SIZE = 40;
   const [signedUpTo, setSignedUpTo] = useState(0);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // State, not a ref: the marker is only there once the Batch tab is drawn,
+  // often after the batch has loaded. With a ref the observer below was set
+  // up before it existed and never ran again, so a batch never showed more
+  // than its first 40 previews (2026-10-21).
+  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
 
   // One request for a whole page of keys, rather than one per document.
   const signPage = async (items: ReviewImage[], token: string) => {
@@ -483,7 +487,6 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
   // Sign the next page when the end of the grid comes into view. What is
   // never scrolled to is never signed and never fetched.
   useEffect(() => {
-    const sentinel = sentinelRef.current;
     if (!sentinel || !review) return;
 
     const observer = new IntersectionObserver(async (entries) => {
@@ -492,12 +495,18 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
 
       const token = await authService.ensureValidToken();
       await signPage(review.images.slice(0, signedUpTo + PAGE_SIZE), token);
-    });
+      // Ahead of the end, not at it. The panels around the grid run a little
+      // past the bottom of the window and the overflow is clipped, so on a
+      // 720-pixel screen the marker stopped 16 pixels short of being seen and
+      // the next page was never asked for: a batch showed 40 previews and
+      // "No preview" on every tile after (2026-10-21). Asking early also
+      // means the pictures are there by the time anyone scrolls to them.
+    }, { rootMargin: "0px 0px 600px 0px" });
 
     observer.observe(sentinel);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [review, signedUpTo]);
+  }, [review, signedUpTo, sentinel]);
 
   // Dragging is tracked on the document, not the handle: the pointer routinely
   // leaves a 4px strip mid-drag, and listeners on the handle would stop firing.
@@ -1675,7 +1684,7 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
 
       {/* Watched by the observer above: crossing it asks for the next page
           of signed URLs. */}
-      <div ref={sentinelRef} className="h-4" />
+      <div ref={setSentinel} className="h-4" />
 
       </div>
 

@@ -996,8 +996,18 @@ export default function VerifyBatch() {
                         {images.indexOf(item) + 1}
                       </span>
 
+                      {/* How many notes the page has — bottom left, with a
+                          mark of its own. It sat on top of the page number,
+                          in the same corner and the same style, so a page
+                          with two notes read as page 2 (2026-10-21). */}
                       {item.comments.length > 0 && (
-                        <span className="absolute left-1 top-1 rounded bg-gray-900/70 px-1 text-[10px] text-white">
+                        <span
+                          title={item.comments.length === 1 ? "1 note" : `${item.comments.length} notes`}
+                          className="absolute bottom-1 left-1 flex items-center gap-0.5 rounded bg-gray-900/70 px-1 text-[10px] text-white"
+                        >
+                          <svg viewBox="0 0 24 24" fill="currentColor" className="size-2.5" aria-hidden="true">
+                            <path d="M4 3h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H8l-4 4V4a1 1 0 0 1 1-1z" />
+                          </svg>
                           {item.comments.length}
                         </span>
                       )}

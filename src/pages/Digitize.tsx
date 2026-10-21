@@ -1289,7 +1289,7 @@ export default function Digitize() {
   return (
     <>
       <PageMeta title="Digitize | SmartDoc" description="Upload and process documents" />
-      <div className="relative flex flex-col flex-1 w-full bg-gray-50 dark:bg-gray-900 overflow-hidden min-w-0 min-h-0">
+      <div className="relative flex flex-col flex-1 w-full bg-gray-50 dark:bg-gray-900 overflow-x-hidden overflow-y-auto min-w-0 min-h-0">
         {/* Header */}
         <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 min-w-0 flex-shrink-0 overflow-hidden w-full">
           <div className="mb-3 pb-3 border-b border-gray-100 dark:border-gray-700">
@@ -2061,8 +2061,14 @@ export default function Digitize() {
           </div>
         )}
 
-        {/* Fixed height, header stays pinned, only the grid scrolls */}
-        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-2 py-2 w-full overflow-hidden flex flex-col min-w-0 flex-shrink-0" style={{ height: '75vh', minHeight: '500px' }}>
+        {/* The room under the header, never less than 480px; only the grid
+            scrolls inside it. It was a fixed 75vh under a header of any
+            height, so on a short screen, or with many attribute fields, its
+            bottom ran past the page and was cut off — the last row half
+            hidden, and the marker that asks for more previews never seen, so
+            a batch showed 40 and "No preview" for the rest (2026-10-21).
+            The page scrolls instead when the header is that tall. */}
+        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-2 py-2 w-full overflow-hidden flex flex-col min-w-0 flex-1 min-h-[480px]">
           {/* Both tabs stay mounted; the hidden one keeps its state. Switching
               to Batch used to unmount the panel, throwing away every signed URL
               and reloading the whole grid on the way back. */}
