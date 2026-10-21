@@ -2339,13 +2339,20 @@ export default function Digitize() {
                 <li key={line}>{line}</li>
               ))}
             </ul>
-            {/* Only for the documents that have not arrived. A page that
-                was sent back is not thrown away by closing — it is the
-                reason closing is refused, and its own line says what to do
-                about it. */}
-            {blockingBeforeClose.some((line) => line !== rejectedBlocker) && (
+            {/* Only for what closing would really throw away: pages still
+                only in this browser, and unsaved edits. It used to follow
+                every line but a send-back, so a page stuck in the queue, or
+                the recording service being down, was told to "upload or
+                clear" with nothing to upload and nothing to lose
+                (2026-10-21). Each of those lines says what to do itself. */}
+            {pendingImageCount > 0 && (
               <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
                 Upload or clear them first — closing now would throw them away.
+              </p>
+            )}
+            {draftState.count > 0 && (
+              <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                Save or discard the changes first — closing now would throw them away.
               </p>
             )}
           </div>
