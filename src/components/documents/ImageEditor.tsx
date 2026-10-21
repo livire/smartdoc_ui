@@ -49,6 +49,22 @@ export const isEdited = (edit: Edit) =>
   edit.grayscale ||
   edit.crop !== null;
 
+const sameEdit = (a: Edit, b: Edit) =>
+  a.rotate === b.rotate &&
+  a.flipH === b.flipH &&
+  a.flipV === b.flipV &&
+  a.brightness === b.brightness &&
+  a.contrast === b.contrast &&
+  a.saturation === b.saturation &&
+  a.grayscale === b.grayscale &&
+  (a.crop === b.crop ||
+    (a.crop !== null &&
+      b.crop !== null &&
+      a.crop.x === b.crop.x &&
+      a.crop.y === b.crop.y &&
+      a.crop.w === b.crop.w &&
+      a.crop.h === b.crop.h));
+
 const filterOf = (edit: Edit) =>
   `brightness(${edit.brightness}%) contrast(${edit.contrast}%) saturate(${
     edit.grayscale ? 0 : edit.saturation
@@ -224,6 +240,9 @@ const ImageEditor = forwardRef<
     // Throws away the draft this editor has already produced, so Reset can go
     // back to the stored document rather than only to the sliders' defaults.
     onRevert: () => void;
+    // Apply with every tool back at the untouched picture: the draft's
+    // picture is dropped, and a category picked alongside it is kept.
+    onApplyOriginal: () => void;
     // So the one Apply button, which lives outside this component, knows
     // whether there is anything to apply.
     onDirtyChange: (dirty: boolean) => void;
@@ -243,10 +262,15 @@ const ImageEditor = forwardRef<
     toolsSide?: "left" | "right";
   }
 >(function ImageEditor(
-  { src, onApply, onRevert, onDirtyChange, initialEdit, footer, header, toolsSide = "right" },
+  { src, onApply, onRevert, onApplyOriginal, onDirtyChange, initialEdit, footer, header, toolsSide = "right" },
   ref
 ) {
   const [edit, setEditState] = useState<Edit>(initialEdit ?? NO_EDIT);
+  // What the draft holds already: the reopened draft, or whatever Apply made
+  // last. "Not applied" means different from this. It meant different from
+  // the stored page, so closing straight after Apply still asked "Leave
+  // without applying?", and so did opening a draft and closing it untouched.
+  const [applied, setApplied] = useState<Edit>(initialEdit ?? NO_EDIT);
   // Where every setting has been. Kept as whole states rather than as a list
   // of actions — an Edit is a handful of numbers, and comparing two of them
   // is cheaper than replaying anything.
@@ -468,10 +492,16 @@ const ImageEditor = forwardRef<
   const apply = async () => {
     const image = imgRef.current;
     if (!image) return;
-    // Nothing was rotated, cropped or adjusted — there is no new picture to
-    // make, and making one anyway would put the document into draft for no
-    // reason.
-    if (!isEdited(effectiveEdit)) return;
+    if (sameEdit(effectiveEdit, applied)) return;
+    // Every tool back where it started, on a page that had a draft picture:
+    // that picture goes. Making a fresh copy of the untouched page instead
+    // would keep the document in draft for no reason.
+    if (!isEdited(effectiveEdit)) {
+      onApplyOriginal();
+      setApplied(NO_EDIT);
+      setSelection(null);
+      return;
+    }
 
     setError(null);
     try {
@@ -481,6 +511,7 @@ const ImageEditor = forwardRef<
       // stay exactly where they are — a crop that was drawn simply becomes
       // part of them.
       setEditState(effectiveEdit);
+      setApplied(effectiveEdit);
       setSelection(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not apply the edit");
@@ -488,8 +519,8 @@ const ImageEditor = forwardRef<
   };
 
   useEffect(() => {
-    onDirtyChange(isEdited(effectiveEdit));
-  }, [effectiveEdit, onDirtyChange]);
+    onDirtyChange(!sameEdit(effectiveEdit, applied));
+  }, [effectiveEdit, applied, onDirtyChange]);
 
   useImperativeHandle(ref, () => ({
     apply,
@@ -857,6 +888,7 @@ const ImageEditor = forwardRef<
                 setSelection(null);
                 resetView();
                 resetAll();
+                setApplied(NO_EDIT);
                 // An applied crop is already part of the picture, not a slider
                 // that can be moved back — so Reset drops the draft too and
                 // starts again from the stored document.

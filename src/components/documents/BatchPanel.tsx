@@ -683,6 +683,24 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
     });
   };
 
+  /** The draft's edited picture undone; a category picked with it stays. */
+  const dropDraftPicture = async (imageId: number) => {
+    const existing = await draftStore.get(imageId);
+    if (!existing) return;
+    if (existing.categoryId === null) {
+      await forgetDraft(imageId);
+      return;
+    }
+    await draftStore.put({ ...existing, full: null, thumb: null, edit: null, updatedAt: Date.now() });
+    setDrafts((prev) => {
+      const next = new Map(prev);
+      const old = next.get(imageId);
+      if (old?.preview) URL.revokeObjectURL(old.preview);
+      next.set(imageId, { categoryId: existing.categoryId, hasImage: false, edit: null, preview: null });
+      return next;
+    });
+  };
+
   const forgetDraft = async (imageId: number) => {
     await draftStore.remove(imageId);
     setDrafts((prev) => {
@@ -2062,6 +2080,7 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
             src={fullUrl!}
             initialEdit={openDraft?.edit ?? null}
             onRevert={() => forgetDraft(openRow.image.image_id)}
+            onApplyOriginal={() => dropDraftPicture(openRow.image.image_id)}
             // The right belongs to the page's text, so the tools take the
             // left and the category picker sits above them.
             toolsSide="left"
