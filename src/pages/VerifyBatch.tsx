@@ -377,6 +377,12 @@ export default function VerifyBatch() {
   // The change is staged like any other, so it costs one call at Save rather
   // than one per second thought.
   const isSaved = (item: ReviewImage) => item.decision !== null;
+  // Accepted in an earlier round: later rounds look only at what was sent
+  // back, and the server refuses a change to these.
+  const acceptedEarlier = (item: ReviewImage) =>
+    item.decision === ImageDecision.VERIFIED &&
+    review?.active_verify_stage_id != null &&
+    item.decided_in_stage_id !== review.active_verify_stage_id;
 
   const unstage = (item: ReviewImage) =>
     setPending((prev) => {
@@ -447,7 +453,7 @@ export default function VerifyBatch() {
   };
 
   const pressReject = (item: ReviewImage) => {
-    if (!claimed) return;
+    if (!claimed || acceptedEarlier(item)) return;
     if (isSaved(item)) {
       // The warning rides on top of the reason dialog rather than stacking a
       // second box in front of it.
@@ -962,6 +968,7 @@ export default function VerifyBatch() {
                               <path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" />
                             </svg>
                           </button>
+                          {!acceptedEarlier(item) && (
                           <button
                             type="button"
                             title="Reject"
@@ -980,6 +987,7 @@ export default function VerifyBatch() {
                               <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
                             </svg>
                           </button>
+                          )}
                         </span>
                       )}
 
@@ -1159,7 +1167,9 @@ export default function VerifyBatch() {
                     <button
                       type="button"
                       title={
-                        isSaved(selected)
+                        acceptedEarlier(selected)
+                          ? "Accepted in an earlier round — it cannot be changed"
+                          : isSaved(selected)
                           ? selected.decision === ImageDecision.REJECTED
                             ? "Rejected and saved"
                             : "Accepted and saved — changing it asks first"
@@ -1167,7 +1177,7 @@ export default function VerifyBatch() {
                           ? "Rejected — press again to undo"
                           : "Reject"
                       }
-                      disabled={!claimed}
+                      disabled={!claimed || acceptedEarlier(selected)}
                       onClick={() => pressReject(selected)}
                       className={`${verdict} ${
                         decisionOf(selected) === ImageDecision.REJECTED
