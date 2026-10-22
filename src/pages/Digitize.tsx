@@ -470,6 +470,12 @@ export default function Digitize() {
   };
 
   useEffect(() => {
+    // An answer that lands after a newer run started is thrown away. Without
+    // this the slower of two runs reset every field to its default, wiping
+    // what somebody had already typed: the upload was then refused for an
+    // empty required field they had filled in (2026-10-21). Two runs happen
+    // in development every time, and whenever the project changes.
+    let cancelled = false;
     const fetchIdentifiers = async () => {
       if (!project?.project_id || !user) {
         setLoading(false);
@@ -492,6 +498,7 @@ export default function Digitize() {
             ? assignmentStageService.getMyWork(project.project_id, token)
             : Promise.resolve([]),
         ]);
+        if (cancelled) return;
 
         const projectAttributes = attributesResponse.data || [];
         setAttributes(projectAttributes);
@@ -513,6 +520,7 @@ export default function Digitize() {
           // Not started yet, but the header still needs its identifier and
           // count — otherwise the screen shows a bare id.
           const identifier = await documentService.getIdentifierById(nextUp.identifier_id, token);
+          if (cancelled) return;
           setActiveAssignmentIdentifier(identifier);
           setLoading(false);
           refreshDocumentCount(identifier, token);
@@ -524,6 +532,7 @@ export default function Digitize() {
           if (inProgress.return_reason) setTab("batch");
 
           const identifier = await documentService.getIdentifierById(inProgress.identifier_id, token);
+          if (cancelled) return;
           setActiveAssignmentIdentifier(identifier);
 
           // The screen is usable now: the fields, the assignment and the
@@ -533,15 +542,22 @@ export default function Digitize() {
           refreshDocumentCount(identifier, token);
         }
       } catch (err) {
+        if (cancelled) return;
         const errorMessage = err instanceof Error ? err.message : "Failed to fetch data";
         setError(errorMessage);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchIdentifiers();
-  }, [project?.project_id, user]);
+    return () => {
+      cancelled = true;
+    };
+    // The user's id, not the user: the object is replaced when somebody
+    // changes their name, and that is no reason to reset the fields.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.project_id, user?.user_id]);
 
 
   useEffect(() => {
