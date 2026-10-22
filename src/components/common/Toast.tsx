@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 interface ToastProps {
@@ -10,10 +10,16 @@ interface ToastProps {
 }
 
 export default function Toast({ message, type, onClose, duration = 5000, position = "top-center" }: ToastProps) {
+  // The countdown starts when a message appears and is not restarted by a
+  // redraw. Every screen passes `onClose` as a new arrow function each
+  // render, and with it in the dependencies a screen that redrew more often
+  // than every five seconds kept its toast up for good (until 2026-10-22).
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    const timer = setTimeout(onClose, duration);
+    const timer = setTimeout(() => close.current(), duration);
     return () => clearTimeout(timer);
-  }, [onClose, duration]);
+  }, [message, duration]);
 
   const bgColor = {
     success: "bg-green-500",

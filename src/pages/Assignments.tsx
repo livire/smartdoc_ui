@@ -108,8 +108,14 @@ export default function Assignments() {
     [identifiers]
   );
 
+  // Newest first. The server answers oldest first, and shown that way a batch
+  // just created landed on the last page — past 100 assignments, out of
+  // sight of the person who made it (until 2026-10-22).
   const projectAssignments = useMemo(
-    () => assignments.filter((a) => projectIdentifierIds.has(String(a.identifier_id))),
+    () =>
+      assignments
+        .filter((a) => projectIdentifierIds.has(String(a.identifier_id)))
+        .sort((x, y) => Number(y.assignment_id) - Number(x.assignment_id)),
     [assignments, projectIdentifierIds]
   );
 
