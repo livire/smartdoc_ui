@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import PageMeta from "../components/common/PageMeta";
 import { useProject } from "../context/ProjectContext";
 import { useAuth } from "../context/AuthContext";
-import { documentService, Identifier, Attribute, ProjectDetails } from "../services/documentService";
+import { documentService, Identifier, IdentifierLock, Attribute, ProjectDetails } from "../services/documentService";
 import { uploadService, UploadAttribute, DeadLetter, QueueHealth } from "../services/uploadService";
 import { authService } from "../services/authService";
 import {
@@ -364,14 +364,27 @@ export default function Digitize() {
   // folios someone else is working on — leaving those out just makes a
   // person wonder whether the number exists at all. They are shown greyed,
   // with the reason.
+  //
+  // Any lock greys it, the same rule as Assignments: 1 is a batch being
+  // captured or waiting to be verified, 2 is a file open on Sequencing. Only
+  // 1 was greyed until 2026-10-22, so a file being sequenced could be picked
+  // and Start then failed with the server's refusal.
   const NEW_IDENTIFIER = "__new__";
   const identifierOptions = [
-    ...identifierChoices.map((row) => ({
-      value: String(row.identifier_id),
-      label: row.identifier_value,
-      disabled: row.open === 1,
-      hint: row.open === 1 ? "Open for Edit" : undefined,
-    })),
+    ...identifierChoices.map((row) => {
+      const lock = Number(row.open) || IdentifierLock.FREE;
+      return {
+        value: String(row.identifier_id),
+        label: row.identifier_value,
+        disabled: lock !== IdentifierLock.FREE,
+        hint:
+          lock === IdentifierLock.SEQUENCING
+            ? "being sequenced"
+            : lock === IdentifierLock.CAPTURE
+              ? "being captured"
+              : undefined,
+      };
+    }),
     ...(newIdentifierValue
       ? [{ value: NEW_IDENTIFIER, label: newIdentifierValue, hint: "new" }]
       : []),
@@ -393,8 +406,11 @@ export default function Digitize() {
     attrs.forEach((attr) => {
       if (attr.default_value) {
         if (attr.type === 'D' && attr.default_value === 'C') {
-          // Use current date for 'C'
-          const today = new Date().toISOString().split('T')[0];
+          // Use current date for 'C' — the person's own day. toISOString
+          // gave the UTC day, which in Pakistan is yesterday's date until
+          // 5am (until 2026-10-22).
+          const now = new Date();
+          const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
           initialValues[attr.attribute_id] = today;
         } else {
           initialValues[attr.attribute_id] = attr.default_value;
@@ -2242,8 +2258,8 @@ export default function Digitize() {
           emptyText="Nothing matches that"
         />
         <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-          Greyed-out entries are still open for upload, or already have an assignment that
-          hasn't been verified.
+          Greyed-out entries are being captured, are waiting to be verified, or are open on
+          Sequencing.
         </p>
 
         {selfAssignError && <Toast message={selfAssignError} type="error" onClose={() => setSelfAssignError(null)} />}
