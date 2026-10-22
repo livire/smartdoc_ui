@@ -555,6 +555,17 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Whenever the batch changes, not only when it is read: a page redone in
+  // place stops counting as sent back the moment it is saved.
+  useEffect(() => {
+    if (!review) return;
+    onRejectedCount?.(
+      review.images.filter((i) => i.decision === ImageDecision.REJECTED).length,
+      review.images.length
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [review]);
+
 
   // The full image is fetched for whatever is selected — the pane shows it,
   // and opening it full screen then costs nothing. The grid itself never
@@ -606,10 +617,6 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
         // What the database says the order is, for Reset to go back to.
         setSavedOrder(result.images.map((row) => row.image.image_id));
         onLoaded?.(result);
-        onRejectedCount?.(
-          result.images.filter((i) => i.decision === ImageDecision.REJECTED).length,
-          result.images.length
-        );
         // Something is always selected, so the pane is never blank while
         // documents exist.
         setSelectedId((prev) =>
@@ -1080,6 +1087,13 @@ const BatchPanel = forwardRef<BatchPanelHandle, BatchPanelProps>(function BatchP
                       ...row,
                       categorised: categoryToSave !== null ? true : row.categorised,
                       enhanced: editToSave ? true : row.enhanced,
+                      // A sent-back page redone in place is answered: the
+                      // status just written replaces the rejection on the
+                      // server, so the screen drops it too. It used to keep
+                      // the page red, and the close dialog went on saying it
+                      // had not been redone until the batch was reloaded.
+                      decision:
+                        editToSave && row.decision === ImageDecision.REJECTED ? null : row.decision,
                       image:
                         categoryToSave !== null
                           ? {
