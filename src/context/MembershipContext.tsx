@@ -44,6 +44,8 @@ export interface Membership {
   can_setup: boolean;
   can_capture: boolean;
   can_verify: boolean;
+  // False once a customer administrator has switched the project off.
+  project_active?: boolean;
 }
 
 // Deny-by-default. Used before the answer arrives and if the request fails,
@@ -206,6 +208,13 @@ export function MembershipProvider({ children }: { children: ReactNode }) {
         // server's answer is what decides, and with no project the app asks
         // them to choose again.
         if (body.data && !answer.is_member && !answer.can_setup) {
+          clearProject();
+          return;
+        }
+        // **Nor one that has been switched off** (2026-10-22): it is gone from
+        // the chooser, so it goes from the menu too. Somebody who can set it
+        // up keeps it, so it can be switched back on.
+        if (body.data && answer.project_active === false && !answer.can_setup) {
           clearProject();
           return;
         }
